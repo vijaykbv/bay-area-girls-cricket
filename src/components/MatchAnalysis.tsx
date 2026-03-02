@@ -1,5 +1,7 @@
 import type { MatchReport, TeamReport, PlayerSummary, NoteType, OpportunityFlag } from "@/lib/analyze";
+import { teamReportToPlayerStats } from "@/lib/analyze";
 import StrikeRateChart from "@/components/StrikeRateChart";
+import OpportunityPerformanceChart from "@/components/OpportunityPerformanceChart";
 
 const NOTE_STYLES: Record<NoteType, string> = {
   positive: "bg-green-50 border-green-200 text-green-800",
@@ -188,6 +190,9 @@ function TeamCard({ team, context }: { team: TeamReport; context?: "tournament" 
           })}
         </div>
       )}
+
+      {/* Opportunity vs Performance chart */}
+      <OpportunityPerformanceChart players={teamReportToPlayerStats(team)} />
     </div>
   );
 }

@@ -663,6 +663,37 @@ export function oversToDecimal(cricketOvers: number): number {
   return full + balls / 6;
 }
 
+/** Convert a single TeamReport to TournamentPlayerStats[] for use in the chart. */
+export function teamReportToPlayerStats(report: TeamReport): TournamentPlayerStats[] {
+  const seen = new Set<string>();
+  const result: TournamentPlayerStats[] = [];
+
+  const process = (p: PlayerSummary) => {
+    const key = p.name.toLowerCase().trim();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({
+      name: p.name,
+      gamesAppeared: 1,
+      battingInnings: p.battingPosition !== undefined ? 1 : 0,
+      totalRuns: p.runs ?? 0,
+      totalBallsFaced: p.balls ?? 0,
+      battingPositions: p.battingPosition !== undefined ? [p.battingPosition] : [],
+      notOuts: p.notOut ? 1 : 0,
+      bowlingAppearances: (p.overs !== undefined && p.overs > 0) ? 1 : 0,
+      totalWickets: p.wickets ?? 0,
+      totalOvers: p.overs ?? 0,
+      totalBowlingRuns: p.bowlingRuns ?? 0,
+      ruleConflicts: 0,
+    });
+  };
+
+  [...report.topOrder, ...report.bowlers, ...report.middleOrderOnly, ...report.bowlerOnly]
+    .forEach(process);
+
+  return result;
+}
+
 export function aggregateTournamentTeam(teamReports: TeamReport[]): TournamentPlayerStats[] {
   const playerMap = new Map<string, TournamentPlayerStats>();
 
