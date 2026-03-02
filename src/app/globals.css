@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-white text-black antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-vv-violet hover:bg-vv-dark text-white font-semibold px-4 py-2 rounded-lg transition-colors;
+  }
+
+  .btn-secondary {
+    @apply bg-black hover:bg-gray-800 text-white font-semibold px-4 py-2 rounded-lg transition-colors;
+  }
+
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden;
+  }
+
+  .section-title {
+    @apply text-2xl font-bold text-black mb-1;
+  }
+
+  .scorecard-table {
+    @apply w-full text-sm border-collapse;
+  }
+
+  .scorecard-table th {
+    @apply bg-black text-white px-3 py-2 text-left font-semibold;
+  }
+
+  .scorecard-table td {
+    @apply px-3 py-2 border-b border-gray-100;
+  }
+
+  .scorecard-table tbody tr:hover {
+    @apply bg-vv-xlight;
+  }
+
+  .stat-badge {
+    @apply inline-flex items-center gap-1 bg-vv-light text-vv-dark text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+}
