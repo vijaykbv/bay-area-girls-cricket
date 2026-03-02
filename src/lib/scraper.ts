@@ -2,37 +2,50 @@ import * as cheerio from "cheerio";
 import type { ScorecardData, InningsData, RawBatting, RawBowling } from "./types";
 
 export async function scrapeScorecard(url: string): Promise<ScorecardData> {
-  const { chromium } = await import("playwright");
+  const MAX_ATTEMPTS = 3;
+  let lastErr: unknown;
 
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    viewport: { width: 1280, height: 800 },
-  });
-  const page = await context.newPage();
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const context = await browser.newContext({
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        viewport: { width: 1280, height: 800 },
+      });
+      const page = await context.newPage();
 
-  try {
-    const fullScorecardUrl = url.replace("viewScorecard.do", "fullScorecard.do");
-    const infoUrl = url.replace("viewScorecard.do", "info.do");
+      const fullScorecardUrl = url.replace("viewScorecard.do", "fullScorecard.do");
+      const infoUrl = url.replace("viewScorecard.do", "info.do");
 
-    await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForSelector(".match-table-innings", { timeout: 20000, state: "attached" });
-    await page.waitForTimeout(1000);
-    const scorecardHtml = await page.content();
+      await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForSelector(".match-table-innings", { timeout: 20000, state: "attached" });
+      await page.waitForTimeout(1000);
+      const scorecardHtml = await page.content();
 
-    await page.goto(infoUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(1000);
-    const infoHtml = await page.content();
+      await page.goto(infoUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForTimeout(1000);
+      const infoHtml = await page.content();
 
-    const { writeFileSync } = await import("fs");
-    writeFileSync("/tmp/cricclubs-debug.html", scorecardHtml);
-    writeFileSync("/tmp/cricclubs-info.html", infoHtml);
+      const { writeFileSync } = await import("fs");
+      writeFileSync("/tmp/cricclubs-debug.html", scorecardHtml);
+      writeFileSync("/tmp/cricclubs-info.html", infoHtml);
 
-    return parseScorecard(scorecardHtml, infoHtml, url);
-  } finally {
-    await browser.close();
+      return parseScorecard(scorecardHtml, infoHtml, url);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = attempt * 5000;
+        console.log(`[scraper] Attempt ${attempt} failed, retrying in ${delay / 1000}s…`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    } finally {
+      await browser.close();
+    }
   }
+
+  throw lastErr;
 }
 
 export function parseScorecard(scorecardHtml: string, infoHtml: string, url: string): ScorecardData {
@@ -134,7 +147,7 @@ function parseBattingSection($: cheerio.CheerioAPI, section: cheerio.Element): R
     // Extract name from the <a> tag only (not the div.scorecard-out-text)
     const nameCell = $(cells[0]);
     nameCell.find(".scorecard-out-text").remove();
-    const name = nameCell.find("a").first().text().replace(/\s+/g, " ").replace(/\*+$/, "").trim();
+    const name = nameCell.find("a").first().text().replace(/\s+/g, " ").replace(/[\*†‡]+$/, "").trim();
     if (!name) continue;
     if (/^(extras?|total|did not bat|dnb|fall of wickets?)/i.test(name)) continue;
 

@@ -591,7 +591,7 @@ export function scorecardDataToTeamInputs(data: ScorecardData): TeamInput[] {
 
   const mapBatters = (inn: InningsData): BatterInput[] =>
     inn.batting.map((b, idx) => ({
-      name: b.name.replace(/\*+$/, "").trim(),
+      name: b.name.replace(/[\*†‡]+$/, "").trim(),
       position: idx + 1,
       runs: b.runs,
       balls: b.balls,
@@ -667,7 +667,7 @@ export function aggregateTournamentTeam(teamReports: TeamReport[]): TournamentPl
   const playerMap = new Map<string, TournamentPlayerStats>();
 
   const getOrCreate = (name: string): TournamentPlayerStats => {
-    const key = name.toLowerCase().replace(/\*+$/, "").replace(/\s+/g, " ").trim();
+    const key = name.toLowerCase().replace(/[\*†‡]+$/, "").replace(/\s+/g, " ").trim();
     if (!playerMap.has(key)) {
       playerMap.set(key, {
         name,
