@@ -9,45 +9,48 @@
  *   - Top-order batters: runs-per-innings + strike-rate
  *   - Bowlers: wickets-per-appearance + economy
  *   - Players who did both: average of the two scores
+ *
+ * Labels are rendered in a fixed column to the right of the chart area with
+ * leader lines back to each dot, then deconflicted vertically so nothing overlaps.
  */
 
 import type { TournamentPlayerStats } from "@/lib/analyze";
 import { oversToDecimal } from "@/lib/analyze";
 
 // ── Layout ────────────────────────────────────────────────────────────────────
-const VB_W = 560;
-const VB_H = 420;
-const CL   = 55;              // chart left
-const CR   = VB_W - 30;       // chart right
-const CT   = 36;              // chart top
-const CB   = VB_H - 52;       // chart bottom
-const CW   = CR - CL;         // chart width
-const CH   = CB - CT;         // chart height
+const VB_W  = 760;
+const VB_H  = 460;
+const CL    = 52;    // chart left
+const CR    = 430;   // chart right  (label column starts here)
+const CT    = 36;    // chart top
+const CB    = VB_H - 52;  // chart bottom
+const CW    = CR - CL;
+const CH    = CB - CT;
+
+const LABEL_X    = CR + 22;   // left edge of label text
+const LABEL_H    = 14;        // vertical space reserved per label
+const LABEL_FONT = 11;
 
 const toX = (v: number) => CL + (v / 100) * CW;
-const toY = (v: number) => CB - (v / 100) * CH;  // 0 = bottom, 100 = top
+const toY = (v: number) => CB - (v / 100) * CH;
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 
 function opportunityScore(
   p: TournamentPlayerStats,
-  teamAvgOversPerApp: number
+  teamAvgOversPerApp: number,
 ): number {
-  // Batting component (0–60): position 1 → 60, position 11 → ~6, no bat → 0
   let batComp = 0;
   if (p.battingPositions.length > 0) {
     const avgPos =
       p.battingPositions.reduce((a, b) => a + b, 0) / p.battingPositions.length;
     batComp = Math.max(0, ((11 - avgPos) / 10) * 60);
   }
-
-  // Bowling component (0–40): overs per appearance vs team average
   let bowlComp = 0;
   if (p.bowlingAppearances > 0 && teamAvgOversPerApp > 0) {
     const avgPerApp = oversToDecimal(p.totalOvers) / p.bowlingAppearances;
     bowlComp = Math.min(40, (avgPerApp / teamAvgOversPerApp) * 40);
   }
-
   return Math.min(100, batComp + bowlComp);
 }
 
@@ -55,37 +58,64 @@ function performanceScore(p: TournamentPlayerStats): number {
   const hasBatted = p.battingInnings > 0 && p.totalBallsFaced > 0;
   const realOvers = oversToDecimal(p.totalOvers);
   const hasBowled = p.bowlingAppearances > 0 && realOvers > 0;
-
   if (!hasBatted && !hasBowled) return 0;
 
   let batPerf = 0;
   if (hasBatted) {
     const runsPerInn = p.totalRuns / p.battingInnings;
     const sr = (p.totalRuns / p.totalBallsFaced) * 100;
-    // Runs: 30+ is solid → 50 pts max. SR: 70→0 to 150→25 pts.
-    const runsScore = Math.min(50, (runsPerInn / 30) * 50);
-    const srScore   = Math.min(25, Math.max(0, ((sr - 70) / 80) * 25));
-    batPerf = runsScore + srScore; // 0–75
+    batPerf = Math.min(50, (runsPerInn / 30) * 50) +
+              Math.min(25, Math.max(0, ((sr - 70) / 80) * 25));
   }
-
   let bowlPerf = 0;
   if (hasBowled) {
     const avgWickets = p.totalWickets / p.bowlingAppearances;
     const economy    = p.totalBowlingRuns / realOvers;
-    // Wickets: 3/game → 50 pts max. Economy: ≤4 → 25 pts, ≥8 → 0 pts.
-    const wktScore  = Math.min(50, (avgWickets / 3) * 50);
-    const econScore = Math.min(25, Math.max(0, ((8 - economy) / 4) * 25));
-    bowlPerf = wktScore + econScore; // 0–75
+    bowlPerf = Math.min(50, (avgWickets / 3) * 50) +
+               Math.min(25, Math.max(0, ((8 - economy) / 4) * 25));
   }
-
   const raw =
-    hasBatted && hasBowled
-      ? (batPerf + bowlPerf) / 2
-      : hasBatted
-      ? batPerf
-      : bowlPerf;
-
+    hasBatted && hasBowled ? (batPerf + bowlPerf) / 2 :
+    hasBatted              ? batPerf : bowlPerf;
   return Math.min(100, (raw / 75) * 100);
+}
+
+// ── Label deconfliction ───────────────────────────────────────────────────────
+// Spreads label Y positions apart so no two are closer than LABEL_H px.
+// Works on a sorted-by-Y copy and propagates pushes outward.
+
+function deconflict(
+  items: Array<{ dotY: number }>,
+  minGap: number,
+  lo: number,
+  hi: number,
+): number[] {
+  // Start each label at its dot's Y, clamped to chart bounds
+  let positions = items.map((it) => Math.min(Math.max(it.dotY, lo), hi));
+
+  for (let pass = 0; pass < 60; pass++) {
+    let moved = false;
+    // Forward pass: push down
+    for (let i = 1; i < positions.length; i++) {
+      const gap = positions[i] - positions[i - 1];
+      if (gap < minGap) {
+        positions[i] = positions[i - 1] + minGap;
+        moved = true;
+      }
+    }
+    // Backward pass: push up
+    for (let i = positions.length - 2; i >= 0; i--) {
+      const gap = positions[i + 1] - positions[i];
+      if (gap < minGap) {
+        positions[i] = positions[i + 1] - minGap;
+        moved = true;
+      }
+    }
+    // Clamp to bounds
+    positions = positions.map((p) => Math.min(Math.max(p, lo), hi));
+    if (!moved) break;
+  }
+  return positions;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -95,12 +125,8 @@ export default function OpportunityPerformanceChart({
 }: {
   players: TournamentPlayerStats[];
 }) {
-  // Team average overs per bowling appearance (used to normalise bowling load)
   const bowlers = players.filter((p) => p.bowlingAppearances > 0);
-  const totalRealOvers = bowlers.reduce(
-    (s, p) => s + oversToDecimal(p.totalOvers),
-    0
-  );
+  const totalRealOvers = bowlers.reduce((s, p) => s + oversToDecimal(p.totalOvers), 0);
   const totalApps = bowlers.reduce((s, p) => s + p.bowlingAppearances, 0);
   const teamAvgOversPerApp = totalApps > 0 ? totalRealOvers / totalApps : 3;
 
@@ -109,26 +135,13 @@ export default function OpportunityPerformanceChart({
     .map((p) => {
       const avgPos =
         p.battingPositions.length > 0
-          ? p.battingPositions.reduce((a, b) => a + b, 0) /
-            p.battingPositions.length
+          ? p.battingPositions.reduce((a, b) => a + b, 0) / p.battingPositions.length
           : 99;
       const role =
-        p.battingPositions.length > 0 && p.bowlingAppearances > 0
-          ? "both"
-          : avgPos <= 4
-          ? "batter"
-          : "bowler";
-
-      // Abbreviated label: first name + last initial
-      const parts = p.name.trim().split(/\s+/);
-      const label =
-        parts.length > 1
-          ? `${parts[0]} ${parts[parts.length - 1][0]}.`
-          : parts[0];
-
+        p.battingPositions.length > 0 && p.bowlingAppearances > 0 ? "both" :
+        avgPos <= 4 ? "batter" : "bowler";
       return {
         name: p.name,
-        label,
         role,
         opp:  opportunityScore(p, teamAvgOversPerApp),
         perf: performanceScore(p),
@@ -137,15 +150,23 @@ export default function OpportunityPerformanceChart({
 
   if (points.length === 0) return null;
 
-  // Quadrant boundaries (thirds of each axis)
-  const q1 = 1 / 3;
-  const q2 = 2 / 3;
-
   const DOT_COLOR: Record<string, string> = {
     batter: "#7c3aed",
     bowler: "#16a34a",
     both:   "#2563eb",
   };
+
+  // Sort points by dot Y (top → bottom) for deconfliction ordering
+  const sorted = [...points]
+    .map((pt, i) => ({ ...pt, origIdx: i, dotY: toY(pt.perf) }))
+    .sort((a, b) => a.dotY - b.dotY);
+
+  // Deconflict label Y positions
+  const labelYs = deconflict(sorted, LABEL_H, CT + LABEL_H / 2, CB - LABEL_H / 2);
+
+  // Quadrant boundaries
+  const q1 = 1 / 3;
+  const q2 = 2 / 3;
 
   return (
     <div className="card p-5">
@@ -153,7 +174,8 @@ export default function OpportunityPerformanceChart({
         Opportunity vs Performance
       </p>
       <p className="text-xs text-gray-400 mb-3">
-        Opportunity combines batting position and bowling load. Performance scores runs &amp; strike rate for batters; wickets &amp; economy for bowlers.
+        Opportunity combines batting position and bowling load. Performance scores
+        runs &amp; strike rate for batters; wickets &amp; economy for bowlers.
       </p>
 
       <svg
@@ -162,22 +184,18 @@ export default function OpportunityPerformanceChart({
         aria-label="Opportunity vs performance scatter chart"
       >
         {/* ── Quadrant backgrounds ─────────────────────────────────────── */}
-        {/* Low opp + low perf */}
-        <rect x={CL}              y={CB - q1 * CH} width={q1 * CW} height={q1 * CH} fill="#f9fafb" />
-        {/* Low opp + high perf (under-utilised) */}
-        <rect x={CL}              y={CT}            width={q1 * CW} height={q1 * CH} fill="#faf5ff" />
-        {/* High opp + low perf (not converting) */}
-        <rect x={CL + q2 * CW}    y={CB - q1 * CH} width={(1 - q2) * CW} height={q1 * CH} fill="#fffbeb" />
-        {/* High opp + high perf (delivering) */}
-        <rect x={CL + q2 * CW}    y={CT}            width={(1 - q2) * CW} height={q1 * CH} fill="#f0fdf4" />
+        <rect x={CL}           y={CB - q1*CH} width={q1*CW}      height={q1*CH} fill="#f9fafb" />
+        <rect x={CL}           y={CT}          width={q1*CW}      height={q1*CH} fill="#faf5ff" />
+        <rect x={CL + q2*CW}   y={CB - q1*CH} width={(1-q2)*CW} height={q1*CH} fill="#fffbeb" />
+        <rect x={CL + q2*CW}   y={CT}          width={(1-q2)*CW} height={q1*CH} fill="#f0fdf4" />
 
-        {/* ── Grid lines (dashed, at 1/3 and 2/3) ────────────────────── */}
+        {/* ── Grid lines ──────────────────────────────────────────────── */}
         {[q1, q2].map((f) => (
-          <line key={`v${f}`} x1={CL + f * CW} y1={CT} x2={CL + f * CW} y2={CB}
+          <line key={`v${f}`} x1={CL + f*CW} y1={CT} x2={CL + f*CW} y2={CB}
             stroke="#e5e7eb" strokeWidth={1} strokeDasharray="4 4" />
         ))}
         {[q1, q2].map((f) => (
-          <line key={`h${f}`} x1={CL} y1={CB - f * CH} x2={CR} y2={CB - f * CH}
+          <line key={`h${f}`} x1={CL} y1={CB - f*CH} x2={CR} y2={CB - f*CH}
             stroke="#e5e7eb" strokeWidth={1} strokeDasharray="4 4" />
         ))}
 
@@ -185,51 +203,82 @@ export default function OpportunityPerformanceChart({
         <line x1={CL} y1={CT} x2={CL} y2={CB} stroke="#d1d5db" strokeWidth={1} />
         <line x1={CL} y1={CB} x2={CR} y2={CB} stroke="#d1d5db" strokeWidth={1} />
 
-        {/* ── X-axis band labels (Low / Average / High) ───────────────── */}
+        {/* ── X-axis band labels ───────────────────────────────────────── */}
         {(["Low", "Average", "High"] as const).map((lbl, i) => (
-          <text key={lbl} x={CL + ((2 * i + 1) / 6) * CW} y={CB + 16}
-            textAnchor="middle" fontSize={11} fill="#9ca3af">
-            {lbl}
-          </text>
+          <text key={lbl} x={CL + ((2*i + 1) / 6) * CW} y={CB + 16}
+            textAnchor="middle" fontSize={11} fill="#9ca3af">{lbl}</text>
         ))}
-        <text x={CL + CW / 2} y={VB_H - 6} textAnchor="middle"
-          fontSize={11} fill="#6b7280" fontWeight="600">
-          Opportunity
-        </text>
+        <text x={CL + CW/2} y={VB_H - 6} textAnchor="middle"
+          fontSize={11} fill="#6b7280" fontWeight="600">Opportunity</text>
 
-        {/* ── Y-axis band labels (Low / Average / High) ───────────────── */}
+        {/* ── Y-axis band labels ───────────────────────────────────────── */}
         {(["Low", "Average", "High"] as const).map((lbl, i) => (
-          <text key={lbl} x={CL - 8} y={CB - ((2 * i + 1) / 6) * CH}
+          <text key={lbl} x={CL - 8} y={CB - ((2*i + 1) / 6) * CH}
             textAnchor="end" dominantBaseline="middle" fontSize={11} fill="#9ca3af">
             {lbl}
           </text>
         ))}
-        <text x={14} y={CT + CH / 2} textAnchor="middle"
+        <text x={14} y={CT + CH/2} textAnchor="middle"
           fontSize={11} fill="#6b7280" fontWeight="600"
-          transform={`rotate(-90, 14, ${CT + CH / 2})`}>
-          Performance
-        </text>
+          transform={`rotate(-90, 14, ${CT + CH/2})`}>Performance</text>
 
         {/* ── Quadrant corner labels ───────────────────────────────────── */}
-        <text x={CL + 5}           y={CT + 13}  fontSize={9} fill="#a78bfa">Under-utilised</text>
-        <text x={CL + q2 * CW + 5} y={CT + 13}  fontSize={9} fill="#16a34a">Delivering</text>
-        <text x={CL + 5}           y={CB - 5}   fontSize={9} fill="#9ca3af">Limited exposure</text>
-        <text x={CL + q2 * CW + 5} y={CB - 5}   fontSize={9} fill="#d97706">Not converting</text>
+        <text x={CL + 5}         y={CT + 13}  fontSize={9} fill="#a78bfa">Under-utilised</text>
+        <text x={CL + q2*CW + 5} y={CT + 13}  fontSize={9} fill="#16a34a">Delivering</text>
+        <text x={CL + 5}         y={CB - 5}   fontSize={9} fill="#9ca3af">Limited exposure</text>
+        <text x={CL + q2*CW + 5} y={CB - 5}   fontSize={9} fill="#d97706">Not converting</text>
 
-        {/* ── Player dots + labels ─────────────────────────────────────── */}
-        {points.map((pt) => {
+        {/* ── Leader lines ─────────────────────────────────────────────── */}
+        {sorted.map((pt, i) => {
           const cx = toX(pt.opp);
-          const cy = toY(pt.perf);
-          const fill = DOT_COLOR[pt.role];
+          const cy = pt.dotY;
+          const ly = labelYs[i];
+          const color = DOT_COLOR[pt.role];
+
+          // Elbow: horizontal from dot to CR+8, then vertical to label Y
+          const elbowX = CR + 8;
           return (
-            <g key={pt.name}>
+            <polyline
+              key={`line-${pt.name}`}
+              points={`${cx},${cy} ${elbowX},${cy} ${elbowX},${ly} ${LABEL_X - 4},${ly}`}
+              fill="none"
+              stroke={color}
+              strokeWidth={0.8}
+              strokeOpacity={0.35}
+            />
+          );
+        })}
+
+        {/* ── Dots ─────────────────────────────────────────────────────── */}
+        {sorted.map((pt) => {
+          const cx = toX(pt.opp);
+          const cy = pt.dotY;
+          const color = DOT_COLOR[pt.role];
+          return (
+            <g key={`dot-${pt.name}`}>
               <title>{`${pt.name} — Opportunity: ${pt.opp.toFixed(0)}, Performance: ${pt.perf.toFixed(0)}`}</title>
-              <circle cx={cx} cy={cy} r={6}
-                fill={fill} fillOpacity={0.85} stroke="white" strokeWidth={1.5} />
-              <text x={cx + 10} y={cy + 4} fontSize={10} fill="#374151">
-                {pt.label}
-              </text>
+              <circle cx={cx} cy={cy} r={5.5}
+                fill={color} fillOpacity={0.85} stroke="white" strokeWidth={1.5} />
             </g>
+          );
+        })}
+
+        {/* ── Labels (in deconflicted column) ──────────────────────────── */}
+        {sorted.map((pt, i) => {
+          const color = DOT_COLOR[pt.role];
+          const ly = labelYs[i];
+          return (
+            <text
+              key={`label-${pt.name}`}
+              x={LABEL_X}
+              y={ly + LABEL_FONT * 0.35}
+              fontSize={LABEL_FONT}
+              fill={color}
+              fontWeight="500"
+              dominantBaseline="middle"
+            >
+              {pt.name}
+            </text>
           );
         })}
       </svg>
