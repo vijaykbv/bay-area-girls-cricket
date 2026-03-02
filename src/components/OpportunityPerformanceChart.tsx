@@ -1,39 +1,36 @@
 /**
  * Two scatter plots — batting and bowling — rendered inside one card.
  *
+ * Each dot is numbered. A legend grid below the chart maps numbers to names.
+ * This guarantees no label overlap regardless of how many players cluster
+ * at the same performance level.
+ *
  * Batting chart:
  *   Opportunity = batting position (pos 1 → 100, pos 11 → 0)
  *   Performance = runs-per-innings + strike-rate
  *
  * Bowling chart:
- *   Opportunity = overs relative to team average (team-avg overs → 50)
+ *   Opportunity = overs relative to team average (team-avg → 50)
  *   Performance = wickets-per-appearance + economy
- *
- * Separating the charts prevents all-rounders from clustering in the
- * middle and lets each discipline be judged on its own terms.
  */
 
 import type { TournamentPlayerStats } from "@/lib/analyze";
 import { oversToDecimal } from "@/lib/analyze";
 
 // ── Layout ────────────────────────────────────────────────────────────────────
-const VB_W  = 760;
-const VB_H  = 440;
-const CL    = 52;           // chart left
-const CR    = 430;          // chart right (label column starts here)
-const CT    = 36;           // chart top
-const CB    = VB_H - 50;   // chart bottom
-const CW    = CR - CL;
-const CH    = CB - CT;
-
-const LABEL_X    = CR + 22;  // left edge of label text
-const LABEL_H    = 14;       // vertical space reserved per label
-const LABEL_FONT = 11;
+const VB_W = 520;
+const VB_H = 420;
+const CL   = 52;
+const CR   = 500;
+const CT   = 36;
+const CB   = 370;
+const CW   = CR - CL;   // 448
+const CH   = CB - CT;   // 334
 
 const toX = (v: number) => CL + (v / 100) * CW;
 const toY = (v: number) => CB - (v / 100) * CH;
 
-// Band boundaries: 4 equal bands (Low / Average / Above Avg / High)
+// 4 equal bands
 const q1 = 1 / 4;
 const q2 = 2 / 4;
 const q3 = 3 / 4;
@@ -55,13 +52,10 @@ function battingPerformance(p: TournamentPlayerStats): number {
   return Math.min(100, (raw / 75) * 100);
 }
 
-/**
- * Bowling opportunity: team-average overs per appearance maps to 50
- * so a bowler getting their "fair share" sits at the Average/Above-Avg boundary.
- */
 function bowlingOpportunity(p: TournamentPlayerStats, teamAvgOversPerApp: number): number {
   if (p.bowlingAppearances === 0 || teamAvgOversPerApp === 0) return 0;
   const avgPerApp = oversToDecimal(p.totalOvers) / p.bowlingAppearances;
+  // Team-average maps to 50 so "got your fair share" sits at the Average/Above-Avg boundary
   return Math.min(100, (avgPerApp / teamAvgOversPerApp) * 50);
 }
 
@@ -75,42 +69,9 @@ function bowlingPerformance(p: TournamentPlayerStats): number {
   return Math.min(100, (raw / 75) * 100);
 }
 
-// ── Label deconfliction ───────────────────────────────────────────────────────
-
-function deconflict(
-  items: Array<{ dotY: number }>,
-  minGap: number,
-  lo: number,
-  hi: number,
-): number[] {
-  let positions = items.map((it) => Math.min(Math.max(it.dotY, lo), hi));
-  for (let pass = 0; pass < 60; pass++) {
-    let moved = false;
-    for (let i = 1; i < positions.length; i++) {
-      if (positions[i] - positions[i - 1] < minGap) {
-        positions[i] = positions[i - 1] + minGap;
-        moved = true;
-      }
-    }
-    for (let i = positions.length - 2; i >= 0; i--) {
-      if (positions[i + 1] - positions[i] < minGap) {
-        positions[i] = positions[i + 1] - minGap;
-        moved = true;
-      }
-    }
-    positions = positions.map((p) => Math.min(Math.max(p, lo), hi));
-    if (!moved) break;
-  }
-  return positions;
-}
-
 // ── ScatterPlot ───────────────────────────────────────────────────────────────
 
-interface PlotPoint {
-  name: string;
-  opp: number;
-  perf: number;
-}
+interface PlotPoint { name: string; opp: number; perf: number; }
 
 function ScatterPlot({
   title,
@@ -127,9 +88,12 @@ function ScatterPlot({
 }) {
   if (points.length === 0) return null;
 
-  const withY = points.map((pt) => ({ ...pt, dotY: toY(pt.perf) }));
-  const sorted = [...withY].sort((a, b) => a.dotY - b.dotY);
-  const labelYs = deconflict(sorted, LABEL_H, CT + LABEL_H / 2, CB - LABEL_H / 2);
+  // Assign numbers alphabetically so the legend is easy to scan
+  const numbered = [...points]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((pt, i) => ({ ...pt, num: i + 1 }));
+
+  const DOT_R = 9; // radius — large enough for two-digit numbers
 
   return (
     <div>
@@ -137,16 +101,17 @@ function ScatterPlot({
         {title}
       </p>
       <p className="text-xs text-gray-400 mb-2">{subtitle}</p>
+
       <svg
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         className="w-full"
-        aria-label={`${title} opportunity vs performance chart`}
+        aria-label={`${title} opportunity vs performance scatter chart`}
       >
         {/* ── Quadrant backgrounds ─────────────────────────────────────── */}
-        <rect x={CL}          y={CB - q1*CH} width={q1*CW}      height={q1*CH} fill="#f9fafb" />
-        <rect x={CL}          y={CT}          width={q1*CW}      height={q1*CH} fill="#faf5ff" />
-        <rect x={CL + q3*CW}  y={CB - q1*CH} width={(1-q3)*CW}  height={q1*CH} fill="#fffbeb" />
-        <rect x={CL + q3*CW}  y={CT}          width={(1-q3)*CW}  height={q1*CH} fill="#f0fdf4" />
+        <rect x={CL}          y={CB - q1*CH} width={q1*CW}     height={q1*CH} fill="#f9fafb" />
+        <rect x={CL}          y={CT}          width={q1*CW}     height={q1*CH} fill="#faf5ff" />
+        <rect x={CL + q3*CW}  y={CB - q1*CH} width={(1-q3)*CW} height={q1*CH} fill="#fffbeb" />
+        <rect x={CL + q3*CW}  y={CT}          width={(1-q3)*CW} height={q1*CH} fill="#f0fdf4" />
 
         {/* ── Grid lines ──────────────────────────────────────────────── */}
         {[q1, q2, q3].map((f) => (
@@ -187,45 +152,38 @@ function ScatterPlot({
         <text x={CL + 5}         y={CB - 5}  fontSize={9} fill="#9ca3af">Limited exposure</text>
         <text x={CL + q3*CW + 5} y={CB - 5}  fontSize={9} fill="#d97706">Not converting</text>
 
-        {/* ── Leader lines ─────────────────────────────────────────────── */}
-        {sorted.map((pt, i) => {
-          const elbowX = CR + 8;
+        {/* ── Numbered dots ────────────────────────────────────────────── */}
+        {numbered.map((pt) => {
+          const cx = toX(pt.opp);
+          const cy = toY(pt.perf);
           return (
-            <polyline
-              key={`line-${pt.name}`}
-              points={`${toX(pt.opp)},${pt.dotY} ${elbowX},${pt.dotY} ${elbowX},${labelYs[i]} ${LABEL_X - 4},${labelYs[i]}`}
-              fill="none"
-              stroke={color}
-              strokeWidth={0.8}
-              strokeOpacity={0.35}
-            />
+            <g key={pt.name}>
+              <title>{`${pt.num}. ${pt.name} — Opportunity: ${pt.opp.toFixed(0)}, Performance: ${pt.perf.toFixed(0)}`}</title>
+              <circle cx={cx} cy={cy} r={DOT_R}
+                fill={color} fillOpacity={0.85} stroke="white" strokeWidth={1.5} />
+              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
+                fontSize={pt.num >= 10 ? 7 : 8} fill="white" fontWeight="bold">
+                {pt.num}
+              </text>
+            </g>
           );
         })}
-
-        {/* ── Dots ─────────────────────────────────────────────────────── */}
-        {sorted.map((pt) => (
-          <g key={`dot-${pt.name}`}>
-            <title>{`${pt.name} — Opportunity: ${pt.opp.toFixed(0)}, Performance: ${pt.perf.toFixed(0)}`}</title>
-            <circle cx={toX(pt.opp)} cy={pt.dotY} r={5.5}
-              fill={color} fillOpacity={0.85} stroke="white" strokeWidth={1.5} />
-          </g>
-        ))}
-
-        {/* ── Labels ───────────────────────────────────────────────────── */}
-        {sorted.map((pt, i) => (
-          <text
-            key={`label-${pt.name}`}
-            x={LABEL_X}
-            y={labelYs[i] + LABEL_FONT * 0.35}
-            fontSize={LABEL_FONT}
-            fill={color}
-            fontWeight="500"
-            dominantBaseline="middle"
-          >
-            {pt.name}
-          </text>
-        ))}
       </svg>
+
+      {/* ── Legend grid ──────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 mt-2">
+        {numbered.map((pt) => (
+          <div key={pt.name} className="flex items-center gap-1.5 text-xs min-w-0">
+            <span
+              className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-white font-bold"
+              style={{ backgroundColor: color, fontSize: pt.num >= 10 ? 9 : 10 }}
+            >
+              {pt.num}
+            </span>
+            <span className="truncate text-gray-700">{pt.name}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -263,14 +221,14 @@ export default function OpportunityPerformanceChart({
   if (battingPoints.length === 0 && bowlingPoints.length === 0) return null;
 
   return (
-    <div className="card p-5 space-y-6">
+    <div className="card p-5 space-y-8">
       <div>
         <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">
           Opportunity vs Performance
         </p>
         <p className="text-xs text-gray-400">
-          Batting: position-based opportunity, judged on runs &amp; strike rate.
-          Bowling: overs relative to team average, judged on wickets &amp; economy.
+          Each dot is numbered — find the player in the legend below the chart.
+          Batting scores position &amp; runs/SR; bowling scores overs load &amp; wickets/economy.
         </p>
       </div>
 
