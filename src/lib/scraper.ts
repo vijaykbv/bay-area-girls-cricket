@@ -60,7 +60,7 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
     }
 
     try {
-      await page.waitForSelector(".match-table-innings", { timeout: 12000, state: "attached" });
+      await page.waitForSelector(".match-table-innings", { timeout: 45000, state: "attached" });
     } catch (selectorErr) {
       if (page.url().includes("ballbyball.do")) {
         throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
