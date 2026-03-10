@@ -3,95 +3,93 @@ import type { Element } from "domhandler";
 import type { ScorecardData, InningsData, RawBatting, RawBowling } from "./types";
 
 export async function scrapeScorecard(url: string): Promise<ScorecardData> {
-  const MAX_ATTEMPTS = 3;
-  let lastErr: unknown;
+  const fullScorecardUrl = url
+    .replace("viewScorecard.do", "fullScorecard.do")
+    .replace("ballbyball.do", "fullScorecard.do");
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    let browser;
-    if (process.env.VERCEL) {
-      const chromium = (await import("@sparticuz/chromium")).default;
-      const { chromium: pw } = await import("playwright-core");
-      browser = await pw.launch({
-        args: [...chromium.args, "--disable-dev-shm-usage"],
-        executablePath: await chromium.executablePath(),
-        headless: true,
-      });
-    } else {
-      const { chromium } = await import("playwright");
-      browser = await chromium.launch({ headless: true });
-    }
-    try {
-      const context = await browser.newContext({
-        userAgent:
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        viewport: { width: 1280, height: 800 },
-      });
-      const page = await context.newPage();
+  if (fullScorecardUrl.includes("ballbyball.do")) {
+    throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
+  }
 
-      const fullScorecardUrl = url.replace("viewScorecard.do", "fullScorecard.do");
-      const infoUrl = url.replace("viewScorecard.do", "info.do");
+  let browser;
+  if (process.env.VERCEL) {
+    const chromium = (await import("@sparticuz/chromium")).default;
+    const { chromium: pw } = await import("playwright-core");
+    browser = await pw.launch({
+      args: [
+        ...chromium.args,
+        "--disable-dev-shm-usage",
+        "--disable-background-networking",
+        "--disable-extensions",
+        "--disable-sync",
+        "--no-default-browser-check",
+        "--no-first-run",
+        "--mute-audio",
+        "--hide-scrollbars",
+      ],
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    });
+  } else {
+    const { chromium } = await import("playwright");
+    browser = await chromium.launch({ headless: true });
+  }
 
-      // Reject ball-by-ball URLs before wasting time navigating
-      if (fullScorecardUrl.includes("ballbyball.do")) {
-        throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
+  try {
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+    });
+    const page = await context.newPage();
+
+    // Block images, fonts, media, and stylesheets to cut memory & bandwidth
+    await page.route("**/*", (route) => {
+      const type = route.request().resourceType();
+      if (["image", "media", "font", "stylesheet"].includes(type)) {
+        route.abort();
+      } else {
+        route.continue();
       }
+    });
 
-      await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
 
-      // CricClubs also server-redirects live matches to ballbyball.do
+    if (page.url().includes("ballbyball.do")) {
+      throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
+    }
+
+    try {
+      await page.waitForSelector(".match-table-innings", { timeout: 12000, state: "attached" });
+    } catch (selectorErr) {
       if (page.url().includes("ballbyball.do")) {
         throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
       }
-
-      try {
-        await page.waitForSelector(".match-table-innings", { timeout: 20000, state: "attached" });
-      } catch (selectorErr) {
-        // Re-check for JS-driven redirect to live scoring page
-        if (page.url().includes("ballbyball.do")) {
-          throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
-        }
-        const { writeFileSync: wfs } = await import("fs");
-        const failHtml = await page.content();
-        wfs("/tmp/cricclubs-fail.html", failHtml);
-        console.error(`[scraper] .match-table-innings not found on ${fullScorecardUrl} — saved to /tmp/cricclubs-fail.html`);
-        throw selectorErr;
-      }
-      await page.waitForTimeout(1000);
-      const scorecardHtml = await page.content();
-
-      await page.goto(infoUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-      await page.waitForTimeout(1000);
-      const infoHtml = await page.content();
-
-      const { writeFileSync } = await import("fs");
-      writeFileSync("/tmp/cricclubs-debug.html", scorecardHtml);
-      writeFileSync("/tmp/cricclubs-info.html", infoHtml);
-
-      return parseScorecard(scorecardHtml, infoHtml, url);
-    } catch (err) {
-      lastErr = err;
-      if (attempt < MAX_ATTEMPTS) {
-        const delay = attempt * 5000;
-        console.log(`[scraper] Attempt ${attempt} failed, retrying in ${delay / 1000}s…`);
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    } finally {
-      await browser.close();
+      const failHtml = await page.content();
+      const { writeFileSync: wfs } = await import("fs");
+      wfs("/tmp/cricclubs-fail.html", failHtml);
+      console.error(`[scraper] .match-table-innings not found on ${fullScorecardUrl} — saved to /tmp/cricclubs-fail.html`);
+      throw selectorErr;
     }
-  }
 
-  throw lastErr;
+    const scorecardHtml = await page.content();
+    const { writeFileSync } = await import("fs");
+    writeFileSync("/tmp/cricclubs-debug.html", scorecardHtml);
+
+    return parseScorecard(scorecardHtml, url);
+  } finally {
+    await browser.close();
+  }
 }
 
-export function parseScorecard(scorecardHtml: string, infoHtml: string, url: string): ScorecardData {
+export function parseScorecard(scorecardHtml: string, url: string): ScorecardData {
   const $s = cheerio.load(scorecardHtml);
-  const $i = cheerio.load(infoHtml);
 
-  // ── Match info from info.do page ────────────────────────────────────────
-  const date        = infoTableValue($i, "Match Date")  || infoTableValue($i, "Date")  || todayStr();
-  const venue       = infoTableValue($i, "Location")    || infoTableValue($i, "Ground") || infoTableValue($i, "Venue") || "";
-  const competition = infoTableValue($i, "Series")      || infoTableValue($i, "League") || infoTableValue($i, "Competition") || "";
-  const toss        = infoTableValue($i, "Toss") || "";
+  // ── Match info from scorecard page ──────────────────────────────────────
+  // CricClubs embeds match details in the scorecard page too
+  const date        = infoTableValue($s, "Match Date")  || infoTableValue($s, "Date")  || todayStr();
+  const venue       = infoTableValue($s, "Location")    || infoTableValue($s, "Ground") || infoTableValue($s, "Venue") || "";
+  const competition = infoTableValue($s, "Series")      || infoTableValue($s, "League") || infoTableValue($s, "Competition") || "";
 
   // ── Team names from score-top summary ──────────────────────────────────
   const teamNames: string[] = [];
