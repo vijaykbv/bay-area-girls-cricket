@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { scrapeScorecard } from "@/lib/scraper";
+
+export const maxDuration = 60;
 import { analyzeMatch, formatMatchReport, inningsToTeamInputs } from "@/lib/analyze";
 import type { ScorecardData, Innings } from "@/lib/types";
 
