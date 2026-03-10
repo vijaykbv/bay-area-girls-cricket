@@ -40,7 +40,19 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
       viewport: { width: 1280, height: 800 },
+      extraHTTPHeaders: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      },
     });
+
+    // Mask headless browser signals that Cloudflare detects
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!(window as any).chrome) (window as any).chrome = { runtime: {} };
+    });
+
     const page = await context.newPage();
 
     // Block images, fonts, and media — keep CSS since some JS waits on it
@@ -55,7 +67,11 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
 
     await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
 
-    if (page.url().includes("ballbyball.do")) {
+    const landedUrl = page.url();
+    const pageTitle = await page.title().catch(() => "");
+    console.log(`[scraper] Landed on: ${landedUrl} | Title: "${pageTitle}"`);
+
+    if (landedUrl.includes("ballbyball.do")) {
       throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
     }
 
@@ -65,11 +81,11 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
       if (page.url().includes("ballbyball.do")) {
         throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
       }
-      const failHtml = await page.content();
+      const finalTitle = await page.title().catch(() => "");
+      const snippet = (await page.content()).slice(0, 800);
       const { writeFileSync: wfs } = await import("fs");
-      wfs("/tmp/cricclubs-fail.html", failHtml);
-      console.error(`[scraper] .match-table-innings not found on ${fullScorecardUrl} — saved to /tmp/cricclubs-fail.html`);
-      throw selectorErr;
+      wfs("/tmp/cricclubs-fail.html", snippet);
+      throw new Error(`Scorecard table not found. Title: "${finalTitle}" | Page start: ${snippet}`);
     }
 
     const scorecardHtml = await page.content();
