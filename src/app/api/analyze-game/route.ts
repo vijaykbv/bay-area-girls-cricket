@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { scrapeScorecard } from "@/lib/scraper";
-
-export const maxDuration = 60;
 import { scorecardDataToTeamInputs, analyzeTeam, type TeamInput } from "@/lib/analyze";
 
 export const maxDuration = 60;
