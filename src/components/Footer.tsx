@@ -25,6 +25,7 @@ export default function Footer() {
                 ["Players", "/players"],
                 ["Schedule", "/schedule"],
                 ["Results", "/results"],
+                ["Hub League", "/hub-league"],
                 ["Statistics", "/stats"],
                 ["News", "/news"],
                 ["About", "/about"],

@@ -135,7 +135,8 @@ function TeamCard({ team, context }: { team: TeamReport; context?: "tournament" 
             </p>
           </div>
           <p className="text-xs text-orange-600">
-            These players received above-average batting time <em>and</em> bowling load — others got less.
+            These lower-order players received above-average batting time <em>and</em> bowling load
+            while the top order was intact — others in the squad got less game time.
           </p>
           <div className="space-y-1.5 pt-0.5">
             {team.opportunityFlags.map((f) => (
@@ -323,6 +324,11 @@ function OpportunityRow({ f }: { f: OpportunityFlag }) {
         <span>
           <span className="font-semibold">{f.overs}ov</span>
           <span className="text-orange-400"> bowl (avg {f.avgOvers})</span>
+        </span>
+        <span className="text-orange-300">·</span>
+        <span>
+          <span className="font-semibold">{f.runContributionPct}%</span>
+          <span className="text-orange-400"> of team runs</span>
         </span>
       </div>
     </div>

@@ -2,7 +2,9 @@ import { createServerClient } from "@/lib/supabase";
 import BattingScorecard from "@/components/BattingScorecard";
 import BowlingScorecard from "@/components/BowlingScorecard";
 import MatchAnalysis from "@/components/MatchAnalysis";
-import { analyzeMatch } from "@/lib/analyze";
+import MatchAIAnalysis from "@/components/MatchAIAnalysis";
+import PlayersOfMatch from "@/components/PlayersOfMatch";
+import { analyzeMatch, computePlayersOfMatch } from "@/lib/analyze";
 import type { Match, Innings } from "@/lib/types";
 import type { Metadata } from "next";
 import { format } from "date-fns";
@@ -92,6 +94,7 @@ export default async function MatchPage({
   const inn1 = innings.find((i) => i.innings_number === 1);
   const inn2 = innings.find((i) => i.innings_number === 2);
   const analysisReport = analyzeMatch(innings);
+  const potm = computePlayersOfMatch(innings);
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -182,6 +185,9 @@ export default async function MatchPage({
         </div>
       </div>
 
+      {/* ── Players of the Match ──────────────────────────────── */}
+      <PlayersOfMatch players={potm} />
+
       {/* ── Innings ───────────────────────────────────────────── */}
       {innings.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
@@ -206,6 +212,9 @@ export default async function MatchPage({
 
       {/* ── Selection & role analysis ─────────────────────────── */}
       <MatchAnalysis report={analysisReport} />
+
+      {/* ── AI coaching analysis ──────────────────────────────── */}
+      <MatchAIAnalysis matchId={params.id} />
     </div>
   );
 }

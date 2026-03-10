@@ -71,6 +71,8 @@ export interface OpportunityFlag {
   avgBalls: number;
   overs: number;
   avgOvers: number;
+  /** Player's runs as a % of the team's batting total (0–100) */
+  runContributionPct: number;
 }
 
 export interface TeamReport {
@@ -98,6 +100,24 @@ export interface TeamReport {
 
 export interface MatchReport {
   teams: TeamReport[];
+}
+
+export interface PlayerOfMatchResult {
+  rank: number;
+  name: string;
+  team: string;
+  totalScore: number;
+  battingScore: number;
+  bowlingScore: number;
+  runs?: number;
+  balls?: number;
+  strikeRate?: number;
+  notOut?: boolean;
+  wickets?: number;
+  bowlingRuns?: number;
+  overs?: number;
+  economy?: number;
+  headline: string;
 }
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
@@ -172,6 +192,298 @@ export function inningsToTeamInputs(innings: Innings[]): TeamInput[] {
 export function analyzeMatch(innings: Innings[]): MatchReport {
   const teams = inningsToTeamInputs(innings);
   return { teams: teams.map(analyzeTeam) };
+}
+
+// ── Players of the Match ───────────────────────────────────────────────────────
+
+export function computePlayersOfMatch(innings: Innings[]): PlayerOfMatchResult[] {
+  const inn1 = innings.find((i) => i.innings_number === 1);
+  const inn2 = innings.find((i) => i.innings_number === 2);
+  if (!inn1 || !inn2) return [];
+
+  const inn1Team = inn1.team?.name ?? "Team 1";
+  const inn2Team = inn2.team?.name ?? "Team 2";
+  const inn1Total = inn1.total_runs;
+  const inn2Total = inn2.total_runs;
+
+  // Match result context
+  const chaseWin = inn2Total > inn1Total;
+  const defendWin = inn1Total > inn2Total;
+  const winnerTeam = chaseWin ? inn2Team : defendWin ? inn1Team : null;
+  const marginRuns = Math.abs(inn2Total - inn1Total);
+  const wicketsInHand = 10 - inn2.total_wickets;
+  const isClose = chaseWin ? wicketsInHand <= 2 : defendWin ? marginRuns <= 20 : false;
+
+  // Max individual runs across the whole match (for volume scoring)
+  const allBattingRuns = [
+    ...(inn1.batting_performances ?? []).map((b) => b.runs),
+    ...(inn2.batting_performances ?? []).map((b) => b.runs),
+  ];
+  const maxRuns = Math.max(...allBattingRuns, 1);
+
+  // Team median SRs
+  const teamMedian = (perfs: typeof inn1.batting_performances) =>
+    calcMedian(
+      (perfs ?? []).filter((b) => b.balls >= 6).map((b) => b.strike_rate ?? 0)
+    );
+  const medSR1 = teamMedian(inn1.batting_performances);
+  const medSR2 = teamMedian(inn2.batting_performances);
+
+  interface PData {
+    name: string;
+    team: string;
+    isWinner: boolean;
+    runs: number;
+    balls: number;
+    strikeRate: number;
+    notOut: boolean;
+    teamTotal: number;
+    medianSR: number;
+    wickets: number;
+    bowlingRuns: number;
+    overs: number;
+    economy: number;
+    keyScalps: number;
+  }
+
+  const pKey = (name: string, team: string) =>
+    `${name.toLowerCase().replace(/[\*†‡]+$/, "").replace(/\s+/g, " ").trim()}|${team}`;
+
+  const pMap = new Map<string, PData>();
+
+  const getP = (name: string, team: string): PData => {
+    const k = pKey(name, team);
+    if (!pMap.has(k)) {
+      pMap.set(k, {
+        name, team,
+        isWinner: team === winnerTeam,
+        runs: 0, balls: 0, strikeRate: 0, notOut: false,
+        teamTotal: 0, medianSR: 0,
+        wickets: 0, bowlingRuns: 0, overs: 0, economy: 0,
+        keyScalps: 0,
+      });
+    }
+    return pMap.get(k)!;
+  };
+
+  // inn1 batting → inn1Team
+  for (const b of inn1.batting_performances ?? []) {
+    const p = getP(b.player_name, inn1Team);
+    p.runs = b.runs; p.balls = b.balls;
+    p.strikeRate = b.strike_rate ?? 0; p.notOut = b.not_out;
+    p.teamTotal = inn1Total; p.medianSR = medSR1;
+  }
+
+  // inn2 batting → inn2Team
+  for (const b of inn2.batting_performances ?? []) {
+    const p = getP(b.player_name, inn2Team);
+    p.runs = b.runs; p.balls = b.balls;
+    p.strikeRate = b.strike_rate ?? 0; p.notOut = b.not_out;
+    p.teamTotal = inn2Total; p.medianSR = medSR2;
+  }
+
+  // inn2 bowling → inn1Team (team that batted in inn1 bowled in inn2)
+  for (const b of inn2.bowling_performances ?? []) {
+    const p = getP(b.player_name, inn1Team);
+    p.wickets = b.wickets; p.bowlingRuns = b.runs;
+    p.overs = b.overs; p.economy = b.economy ?? 0;
+  }
+
+  // inn1 bowling → inn2Team
+  for (const b of inn1.bowling_performances ?? []) {
+    const p = getP(b.player_name, inn2Team);
+    p.wickets = b.wickets; p.bowlingRuns = b.runs;
+    p.overs = b.overs; p.economy = b.economy ?? 0;
+  }
+
+  // Key scalps: dismissed batters who scored ≥ 15 runs
+  // inn1Team bowlers dismissed inn2 batters
+  for (const dismissed of inn2.batting_performances ?? []) {
+    if (dismissed.not_out || !dismissed.bowler_name || dismissed.runs < 15) continue;
+    const bowler = (inn2.bowling_performances ?? []).find((b) =>
+      bowlerNamesMatch(b.player_name, dismissed.bowler_name!)
+    );
+    if (!bowler) continue;
+    const p = pMap.get(pKey(bowler.player_name, inn1Team));
+    if (p) p.keyScalps++;
+  }
+  // inn2Team bowlers dismissed inn1 batters
+  for (const dismissed of inn1.batting_performances ?? []) {
+    if (dismissed.not_out || !dismissed.bowler_name || dismissed.runs < 15) continue;
+    const bowler = (inn1.bowling_performances ?? []).find((b) =>
+      bowlerNamesMatch(b.player_name, dismissed.bowler_name!)
+    );
+    if (!bowler) continue;
+    const p = pMap.get(pKey(bowler.player_name, inn2Team));
+    if (p) p.keyScalps++;
+  }
+
+  // Score every player
+  const results: (PlayerOfMatchResult & { _batScore: number; _bowlScore: number })[] = [];
+
+  for (const p of Array.from(pMap.values())) {
+    const batScore = potmBattingScore(p, maxRuns, isClose);
+    const bowlScore = potmBowlingScore(p, isClose);
+    const totalScore = batScore + bowlScore;
+    if (totalScore < 5) continue;
+
+    results.push({
+      rank: 0,
+      name: p.name,
+      team: p.team,
+      totalScore: round1(totalScore),
+      battingScore: round1(batScore),
+      bowlingScore: round1(bowlScore),
+      runs: p.balls > 0 ? p.runs : undefined,
+      balls: p.balls > 0 ? p.balls : undefined,
+      strikeRate: p.balls >= 6 && p.strikeRate > 0 ? p.strikeRate : undefined,
+      notOut: p.notOut,
+      wickets: p.overs > 0 ? p.wickets : undefined,
+      bowlingRuns: p.overs > 0 ? p.bowlingRuns : undefined,
+      overs: p.overs > 0 ? p.overs : undefined,
+      economy: p.overs > 0 ? p.economy : undefined,
+      headline: potmHeadline(p, batScore, bowlScore, winnerTeam, isClose, chaseWin),
+      _batScore: batScore,
+      _bowlScore: bowlScore,
+    });
+  }
+
+  return results
+    .sort((a, b) => b.totalScore - a.totalScore)
+    .slice(0, 3)
+    .map(({ _batScore, _bowlScore, ...rest }, i) => ({
+      ...rest,
+      rank: i + 1,
+    }));
+}
+
+function potmSrFactor(sr: number, medSR: number): number {
+  if (medSR === 0) return 0.5;
+  const ratio = sr / medSR;
+  if (ratio >= 1.25) return 1.0;
+  if (ratio >= 1.0)  return 0.80;
+  if (ratio >= 0.85) return 0.55;
+  if (ratio >= 0.70) return 0.30;
+  return 0.10;
+}
+
+function potmBattingScore(
+  p: { runs: number; balls: number; strikeRate: number; notOut: boolean; teamTotal: number; medianSR: number; isWinner: boolean },
+  maxRuns: number,
+  isClose: boolean
+): number {
+  if (p.balls === 0) return 0;
+  const contribPct = p.teamTotal > 0 ? p.runs / p.teamTotal : 0;
+  const volumePct  = p.runs / maxRuns;
+  const srMult = p.balls >= 6 ? potmSrFactor(p.strikeRate, p.medianSR) : 0.4;
+
+  let score =
+    contribPct * 30 +                          // contribution to team total (0–30)
+    volumePct  * 20 +                          // absolute volume vs match top-scorer (0–20)
+    srMult * Math.min(p.runs, 40) * 0.35;      // SR quality scaled by runs (0–14)
+
+  if (p.isWinner) score += 5;
+  if (p.notOut && p.isWinner) score += 6;      // unbeaten, team won — match-defining
+  if (isClose && p.runs >= 15) score += 5;     // meaningful runs in a tight match
+
+  return Math.max(score, 0);
+}
+
+function potmEconFactor(economy: number, overs: number): number {
+  const overScale = Math.min(overs / 3, 1);    // full weight only at 3+ overs
+  let f: number;
+  if (economy <= 4)       f = 1.00;
+  else if (economy <= 5)  f = 0.80;
+  else if (economy <= 6)  f = 0.58;
+  else if (economy <= 7)  f = 0.33;
+  else if (economy <= 8)  f = 0.12;
+  else                    f = 0;
+  return f * overScale;
+}
+
+function potmBowlingScore(
+  p: { wickets: number; bowlingRuns: number; overs: number; economy: number; keyScalps: number; isWinner: boolean },
+  isClose: boolean
+): number {
+  if (p.overs === 0) return 0;
+  const wicketScore = Math.min(p.wickets * 13, 52);
+  const econScore   = potmEconFactor(p.economy, p.overs) * 20;
+  const scalpBonus  = Math.min(p.keyScalps * 7, 21);
+
+  let score = wicketScore + econScore + scalpBonus;
+  if (p.isWinner) score += 5;
+  if (isClose && p.wickets >= 2) score += 5;
+  if (isClose && p.economy <= 5 && p.overs >= 2) score += 3;
+
+  return Math.max(score, 0);
+}
+
+function potmHeadline(
+  p: {
+    name: string; team: string; isWinner: boolean;
+    runs: number; balls: number; strikeRate: number; notOut: boolean;
+    wickets: number; bowlingRuns: number; overs: number; economy: number;
+    keyScalps: number;
+  },
+  batScore: number,
+  bowlScore: number,
+  winnerTeam: string | null,
+  isClose: boolean,
+  chaseWin: boolean,
+): string {
+  const won = p.isWinner;
+  const hasBat  = p.balls > 0;
+  const hasBowl = p.overs > 0;
+  const both    = batScore > 12 && bowlScore > 12;
+
+  if (both) {
+    const batStr  = `${p.runs}${p.notOut ? "*" : ""} runs`;
+    const bowlStr = `${p.wickets}/${p.bowlingRuns}`;
+    return `${batStr} & ${bowlStr} — all-round match-winner`;
+  }
+
+  if (batScore >= bowlScore && hasBat) {
+    const srStr = p.balls >= 6 ? `, SR ${Math.round(p.strikeRate)}` : "";
+    const notOutBit = p.notOut && won;
+    const context = notOutBit && chaseWin
+      ? " — unbeaten to seal the chase"
+      : notOutBit
+      ? " — unbeaten, kept the innings together"
+      : isClose && won
+      ? " — decisive runs in a tight match"
+      : won && chaseWin
+      ? " in the chase"
+      : won
+      ? " — led the team's batting"
+      : isClose
+      ? " — fought hard in defeat"
+      : "";
+    return `${p.runs}${p.notOut ? "*" : ""} (${p.balls}b${srStr})${context}`;
+  }
+
+  if (hasBowl) {
+    const scalp = p.keyScalps > 0
+      ? `, ${p.keyScalps} key scalp${p.keyScalps > 1 ? "s" : ""}`
+      : "";
+    if (p.wickets > 0) {
+      const context = isClose && won
+        ? " — match-turning spell"
+        : won
+        ? " — broke the opposition's batting"
+        : isClose
+        ? " — kept the team in the game"
+        : "";
+      return `${p.wickets}/${p.bowlingRuns} in ${p.overs} overs (Econ ${p.economy.toFixed(1)})${scalp}${context}`;
+    }
+    // Economy hero — no wickets but very tight
+    return `${p.overs} overs for ${p.bowlingRuns} runs (Econ ${p.economy.toFixed(1)}) — tightest bowler on the day`;
+  }
+
+  return `${p.runs}${p.notOut ? "*" : ""} runs (${p.balls}b)`;
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
 }
 
 export function analyzeTeam(team: TeamInput): TeamReport {
@@ -384,7 +696,9 @@ export function analyzeTeam(team: TeamInput): TeamReport {
   }
 
   // ── Opportunity concentration ─────────────────────────────────────────────
-  // Players who got above-average batting time AND above-average bowling load
+  // Only flag position-5+ players who consumed above-average batting AND bowling
+  // time when the context doesn't justify it (i.e. the top order wasn't collapsing
+  // and they weren't carrying the innings).
   const battersWithBalls = team.batters.filter((b) => b.balls > 0);
   const bowlersWithOvers = team.bowlers.filter((b) => b.overs > 0);
 
@@ -395,11 +709,38 @@ export function analyzeTeam(team: TeamInput): TeamReport {
     ? bowlersWithOvers.reduce((s, b) => s + b.overs, 0) / bowlersWithOvers.length
     : 0;
 
+  // Top-order coverage: if top 4 batted < 40% of total innings balls they
+  // collapsed early, meaning the lower order was forced to bat — not an
+  // opportunity issue.
+  const inningsTotalBalls = battersWithBalls.reduce((s, b) => s + b.balls, 0);
+  const top4TotalBalls = team.batters
+    .filter((b) => b.position <= 4)
+    .reduce((s, b) => s + b.balls, 0);
+  const top4Coverage = inningsTotalBalls > 0 ? top4TotalBalls / inningsTotalBalls : 0;
+  const topOrderCollapsed = top4Coverage < 0.40;
+
+  // Team batting total (runs only, ignoring extras) for contribution %
+  const teamBattingTotal = team.batters.reduce((s, b) => s + b.runs, 0);
+
   const opportunityFlags: OpportunityFlag[] = [];
   for (const batter of team.batters) {
+    // Top-4 rule violations are already surfaced in ruleConflicts — skip here
+    if (batter.position <= 4) continue;
     if (batter.balls <= avgBallsFaced) continue;
     const bowlerData = bowlerMap.get(norm(batter.name));
     if (!bowlerData || bowlerData.overs <= avgOversBowled) continue;
+
+    const runContributionPct = teamBattingTotal > 0
+      ? Math.round((batter.runs / teamBattingTotal) * 100)
+      : 0;
+
+    // Suppress: top order collapsed — lower order had to bat
+    if (topOrderCollapsed) continue;
+
+    // Suppress: batter carried a large share of the scoring — rescue innings,
+    // not opportunity hoarding (threshold: ≥ 20% of team runs)
+    if (runContributionPct >= 20) continue;
+
     opportunityFlags.push({
       name: batter.name,
       battingPosition: batter.position,
@@ -407,6 +748,7 @@ export function analyzeTeam(team: TeamInput): TeamReport {
       avgBalls: Math.round(avgBallsFaced),
       overs: bowlerData.overs,
       avgOvers: parseFloat(avgOversBowled.toFixed(1)),
+      runContributionPct,
     });
   }
 
@@ -483,7 +825,7 @@ export function formatMatchReport(report: MatchReport, matchTitle?: string): str
       lines.push(`\nOPPORTUNITY CONCENTRATION  (avg balls: ${team.avgBallsFaced}, avg overs: ${team.avgOversBowled})`);
       for (const f of team.opportunityFlags) {
         lines.push(
-          `  ⚑  ${pad(f.name, 28)}  batted ${f.balls}b (avg ${f.avgBalls})  bowled ${f.overs}ov (avg ${f.avgOvers})`
+          `  ⚑  ${pad(f.name, 28)}  batted ${f.balls}b (avg ${f.avgBalls})  bowled ${f.overs}ov (avg ${f.avgOvers})  scored ${f.runContributionPct}% of team runs`
         );
       }
     }
@@ -528,7 +870,7 @@ export function formatMatchReport(report: MatchReport, matchTitle?: string): str
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 function norm(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, " ").trim();
+  return name.toLowerCase().replace(/[\*†‡]+$/, "").replace(/\s+/g, " ").trim();
 }
 
 /**

@@ -32,6 +32,7 @@ export interface Match {
   match_type?: string;
   competition?: string;
   status: "scheduled" | "completed" | "cancelled";
+  manager_notes?: string | null;
   created_at: string;
 }
 
@@ -157,7 +158,76 @@ export interface RawBowling {
   no_balls: number;
 }
 
+export interface HubSeason {
+  id: string;
+  name: string;
+  age_group: string;
+  active: boolean;
+  created_at: string;
+}
+
+export interface HubStanding {
+  id: string;
+  season_id: string;
+  team_name: string;
+  played: number;
+  won: number;
+  lost: number;
+  tied: number;
+  no_result: number;
+  points: number;
+  nrr: number;
+  updated_at: string;
+}
+
+export interface HubUpdate {
+  id: string;
+  season_id: string;
+  week_number: number;
+  type: "preview" | "saturday" | "sunday";
+  title: string;
+  content: string;
+  published: boolean;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface HubTopPerformer {
+  id: string;
+  season_id: string;
+  week_number: number;
+  category: string;
+  player_name: string;
+  team_name: string;
+  value: string;
+  match_context: string | null;
+  created_at: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+export interface Tournament {
+  id: string;
+  name: string;
+  team_name: string;
+  created_at: string;
+  tournament_games?: TournamentGame[];
+}
+
+export interface TournamentGame {
+  id: string;
+  tournament_id: string;
+  game_number: number;
+  opponent: string | null;
+  date: string | null;
+  competition: string | null;
+  scorecard_url: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  team_report: any; // TeamReport, deserialized from JSONB
+  manager_notes?: string | null;
+  ai_narrative?: string | null;
+  created_at: string;
 }

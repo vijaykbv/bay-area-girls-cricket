@@ -3,7 +3,7 @@ import { createServerClient } from "@/lib/supabase";
 import MatchCard from "@/components/MatchCard";
 import Chatbot from "@/components/Chatbot";
 import type { Match } from "@/lib/types";
-import { ArrowRight, Users, Trophy, BarChart3 } from "lucide-react";
+import { ArrowRight, Users, Trophy, BarChart3, Medal } from "lucide-react";
 
 export const revalidate = 3600;
 
@@ -100,6 +100,7 @@ export default async function HomePage() {
               { icon: <Users size={18} />, label: "Players", href: "/players" },
               { icon: <Trophy size={18} />, label: "Matches", href: "/results" },
               { icon: <BarChart3 size={18} />, label: "Statistics", href: "/stats" },
+              { icon: <Medal size={18} />, label: "Tournaments", href: "/tournaments" },
             ].map((item) => (
               <Link
                 key={item.label}

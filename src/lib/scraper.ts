@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import type { Element } from "domhandler";
 import type { ScorecardData, InningsData, RawBatting, RawBowling } from "./types";
 
 export async function scrapeScorecard(url: string): Promise<ScorecardData> {
@@ -6,8 +7,19 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
   let lastErr: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    let browser;
+    if (process.env.VERCEL) {
+      const chromium = (await import("@sparticuz/chromium")).default;
+      const { chromium: pw } = await import("playwright-core");
+      browser = await pw.launch({
+        args: chromium.args,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    } else {
+      const { chromium } = await import("playwright");
+      browser = await chromium.launch({ headless: true });
+    }
     try {
       const context = await browser.newContext({
         userAgent:
@@ -19,8 +31,31 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
       const fullScorecardUrl = url.replace("viewScorecard.do", "fullScorecard.do");
       const infoUrl = url.replace("viewScorecard.do", "info.do");
 
+      // Reject ball-by-ball URLs before wasting time navigating
+      if (fullScorecardUrl.includes("ballbyball.do")) {
+        throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
+      }
+
       await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-      await page.waitForSelector(".match-table-innings", { timeout: 20000, state: "attached" });
+
+      // CricClubs also server-redirects live matches to ballbyball.do
+      if (page.url().includes("ballbyball.do")) {
+        throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
+      }
+
+      try {
+        await page.waitForSelector(".match-table-innings", { timeout: 20000, state: "attached" });
+      } catch (selectorErr) {
+        // Re-check for JS-driven redirect to live scoring page
+        if (page.url().includes("ballbyball.do")) {
+          throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
+        }
+        const { writeFileSync: wfs } = await import("fs");
+        const failHtml = await page.content();
+        wfs("/tmp/cricclubs-fail.html", failHtml);
+        console.error(`[scraper] .match-table-innings not found on ${fullScorecardUrl} — saved to /tmp/cricclubs-fail.html`);
+        throw selectorErr;
+      }
       await page.waitForTimeout(1000);
       const scorecardHtml = await page.content();
 
@@ -135,7 +170,7 @@ export function parseScorecard(scorecardHtml: string, infoHtml: string, url: str
 
 // ── Section parsers ──────────────────────────────────────────────────────────
 
-function parseBattingSection($: cheerio.CheerioAPI, section: cheerio.Element): RawBatting[] {
+function parseBattingSection($: cheerio.CheerioAPI, section: Element): RawBatting[] {
   const rows = $(section).find("tbody tr").toArray();
   const batting: RawBatting[] = [];
 
@@ -182,7 +217,7 @@ function parseBattingSection($: cheerio.CheerioAPI, section: cheerio.Element): R
   return batting;
 }
 
-function parseBowlingSection($: cheerio.CheerioAPI, section: cheerio.Element): RawBowling[] {
+function parseBowlingSection($: cheerio.CheerioAPI, section: Element): RawBowling[] {
   const rows = $(section).find("tbody tr").toArray();
   const bowling: RawBowling[] = [];
 
@@ -216,7 +251,7 @@ function parseBowlingSection($: cheerio.CheerioAPI, section: cheerio.Element): R
   return bowling;
 }
 
-function extractTotalFromSection($: cheerio.CheerioAPI, section: cheerio.Element): string {
+function extractTotalFromSection($: cheerio.CheerioAPI, section: Element): string {
   // Find the Total row in tbody
   let total = "";
   $(section).find("tbody tr").each((_, row) => {
@@ -234,7 +269,7 @@ function extractTotalFromSection($: cheerio.CheerioAPI, section: cheerio.Element
   return total;
 }
 
-function extractExtrasNumber($: cheerio.CheerioAPI, section: cheerio.Element): string {
+function extractExtrasNumber($: cheerio.CheerioAPI, section: Element): string {
   let extras = "0";
   $(section).find("tbody tr").each((_, row) => {
     const text = $(row).text().replace(/\s+/g, " ").trim();

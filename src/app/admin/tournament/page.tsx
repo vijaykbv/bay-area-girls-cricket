@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Trash2,
@@ -10,6 +11,7 @@ import {
   ChevronUp,
   CheckCircle,
   Clock,
+  Save,
 } from "lucide-react";
 import MatchAnalysis from "@/components/MatchAnalysis";
 import OpportunityPerformanceChart from "@/components/OpportunityPerformanceChart";
@@ -20,64 +22,81 @@ import {
   type TournamentPlayerStats,
 } from "@/lib/analyze";
 
+interface GameInput {
+  url: string;
+  notes: string;
+}
+
 interface GameResult {
   gameNumber: number;
   url: string;
+  notes: string;
   opponent: string | null;
   date: string | null;
   competition: string | null;
   teamReport: TeamReport | null;
+  narrative: string | null;
   error: string | null;
   status: "pending" | "loading" | "done" | "error";
 }
 
 export default function TournamentPage() {
+  const router = useRouter();
   const [teamName, setTeamName] = useState("");
-  const [urls, setUrls] = useState(["", ""]);
+  const [gameInputs, setGameInputs] = useState<GameInput[]>([{ url: "", notes: "" }, { url: "", notes: "" }]);
   const [isRunning, setIsRunning] = useState(false);
   const [games, setGames] = useState<GameResult[]>([]);
   const [expandedGames, setExpandedGames] = useState<Set<number>>(new Set());
   const [tournamentStats, setTournamentStats] = useState<
     TournamentPlayerStats[] | null
   >(null);
+  const [tournamentName, setTournamentName] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
-  function addUrl() {
-    setUrls([...urls, ""]);
+  function addGame() {
+    setGameInputs([...gameInputs, { url: "", notes: "" }]);
   }
 
-  function removeUrl(idx: number) {
-    setUrls(urls.filter((_, i) => i !== idx));
+  function removeGame(idx: number) {
+    setGameInputs(gameInputs.filter((_, i) => i !== idx));
   }
 
-  function updateUrl(idx: number, value: string) {
-    const next = [...urls];
-    next[idx] = value;
-    setUrls(next);
+  function updateGameUrl(idx: number, value: string) {
+    setGameInputs(gameInputs.map((g, i) => (i === idx ? { ...g, url: value } : g)));
+  }
+
+  function updateGameNotes(idx: number, value: string) {
+    setGameInputs(gameInputs.map((g, i) => (i === idx ? { ...g, notes: value } : g)));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const validUrls = urls.map((u) => u.trim()).filter(Boolean);
-    if (!teamName.trim() || validUrls.length === 0) return;
+    const validInputs = gameInputs.filter((g) => g.url.trim());
+    if (!teamName.trim() || validInputs.length === 0) return;
 
     setIsRunning(true);
     setTournamentStats(null);
+    setSaveStatus("idle");
+    setTournamentName("");
 
-    const initial: GameResult[] = validUrls.map((url, i) => ({
+    const initial: GameResult[] = validInputs.map((input, i) => ({
       gameNumber: i + 1,
-      url,
+      url: input.url,
+      notes: input.notes,
       opponent: null,
       date: null,
       competition: null,
       teamReport: null,
+      narrative: null,
       error: null,
       status: "pending",
     }));
     setGames(initial);
 
     const completed: TeamReport[] = [];
+    let firstCompetition = "";
 
-    for (let i = 0; i < validUrls.length; i++) {
+    for (let i = 0; i < validInputs.length; i++) {
       setGames((prev) =>
         prev.map((g) =>
           g.gameNumber === i + 1 ? { ...g, status: "loading" } : g
@@ -88,7 +107,11 @@ export default function TournamentPage() {
         const res = await fetch("/api/analyze-game", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ teamName: teamName.trim(), url: validUrls[i] }),
+          body: JSON.stringify({
+            teamName: teamName.trim(),
+            url: validInputs[i].url,
+            notes: validInputs[i].notes,
+          }),
         });
         const data = await res.json();
 
@@ -102,6 +125,7 @@ export default function TournamentPage() {
           );
         } else {
           completed.push(data.teamReport);
+          if (!firstCompetition && data.competition) firstCompetition = data.competition;
           setGames((prev) =>
             prev.map((g) =>
               g.gameNumber === i + 1
@@ -109,6 +133,7 @@ export default function TournamentPage() {
                     ...g,
                     status: "done",
                     teamReport: data.teamReport,
+                    narrative: data.narrative ?? null,
                     opponent: data.opponent,
                     date: data.date,
                     competition: data.competition,
@@ -131,6 +156,7 @@ export default function TournamentPage() {
 
     if (completed.length > 0) {
       setTournamentStats(aggregateTournamentTeam(completed));
+      if (firstCompetition) setTournamentName(firstCompetition);
     }
 
     setIsRunning(false);
@@ -142,6 +168,40 @@ export default function TournamentPage() {
       if (prev.has(gameNumber)) return new Set(arr.filter((n) => n !== gameNumber));
       return new Set(arr.concat(gameNumber));
     });
+  }
+
+  async function handleSave() {
+    const completed = games.filter((g) => g.status === "done" && g.teamReport);
+    if (!tournamentName.trim() || completed.length === 0) return;
+    setSaveStatus("saving");
+    try {
+      const res = await fetch("/api/tournaments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: tournamentName.trim(),
+          teamName,
+          games: completed.map((g) => ({
+            gameNumber: g.gameNumber,
+            opponent: g.opponent,
+            date: g.date,
+            competition: g.competition,
+            url: g.url,
+            teamReport: g.teamReport,
+            managerNotes: g.notes,
+            narrative: g.narrative,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Save failed");
+      setSaveStatus("saved");
+      router.push(`/tournaments/${data.id}`);
+    } catch (err) {
+      console.error(err);
+      setSaveStatus("idle");
+      alert(err instanceof Error ? err.message : "Save failed");
+    }
   }
 
   const batters = tournamentStats?.filter((p) => p.battingInnings > 0) ?? [];
@@ -181,36 +241,45 @@ export default function TournamentPage() {
 
         <div>
           <label className="block text-sm font-semibold text-black mb-2">
-            Match URLs
+            Matches
           </label>
-          <div className="space-y-2">
-            {urls.map((url, idx) => (
-              <div key={idx} className="flex gap-2 items-center">
-                <span className="text-xs text-gray-400 w-5 shrink-0 text-right">
-                  {idx + 1}
-                </span>
-                <input
-                  type="url"
-                  value={url}
-                  onChange={(e) => updateUrl(idx, e.target.value)}
-                  placeholder="https://cricclubs.com/.../viewScorecard.do?matchId=..."
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-vv-violet"
+          <div className="space-y-4">
+            {gameInputs.map((game, idx) => (
+              <div key={idx} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-gray-400 w-5 shrink-0 text-right font-medium">
+                    {idx + 1}
+                  </span>
+                  <input
+                    type="url"
+                    value={game.url}
+                    onChange={(e) => updateGameUrl(idx, e.target.value)}
+                    placeholder="https://cricclubs.com/.../viewScorecard.do?matchId=..."
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-vv-violet"
+                  />
+                  {gameInputs.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeGame(idx)}
+                      className="text-gray-400 hover:text-red-500 p-1 shrink-0"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={game.notes}
+                  onChange={(e) => updateGameNotes(idx, e.target.value)}
+                  placeholder="Notes from this game — things the scorecard doesn't capture…"
+                  rows={2}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-vv-violet resize-y ml-7"
                 />
-                {urls.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeUrl(idx)}
-                    className="text-gray-400 hover:text-red-500 p-1 shrink-0"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                )}
               </div>
             ))}
           </div>
           <button
             type="button"
-            onClick={addUrl}
+            onClick={addGame}
             className="mt-2 flex items-center gap-1 text-sm text-vv-violet font-semibold hover:underline"
           >
             <Plus size={14} /> Add match
@@ -430,6 +499,47 @@ export default function TournamentPage() {
             </section>
           )}
 
+          {/* Save Tournament */}
+          {tournamentStats && (
+            <div className="card p-6 border-t-4 border-vv-violet space-y-4">
+              <h2 className="text-lg font-bold">Save to Public Site</h2>
+              <div>
+                <label className="block text-sm font-semibold text-black mb-1">
+                  Tournament Name
+                </label>
+                <input
+                  type="text"
+                  value={tournamentName}
+                  onChange={(e) => setTournamentName(e.target.value)}
+                  placeholder="e.g. SD Open Spring 2025"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-vv-violet"
+                />
+              </div>
+              <button
+                onClick={handleSave}
+                disabled={saveStatus === "saving" || saveStatus === "saved" || !tournamentName.trim()}
+                className="btn-primary flex items-center gap-2 disabled:opacity-50"
+              >
+                {saveStatus === "saving" ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Saving…
+                  </>
+                ) : saveStatus === "saved" ? (
+                  <>
+                    <CheckCircle size={16} />
+                    Saved — redirecting…
+                  </>
+                ) : (
+                  <>
+                    <Save size={16} />
+                    Save Tournament
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Game by game */}
           <section>
             <h2 className="section-title text-2xl mb-4">Game by Game</h2>
@@ -510,6 +620,16 @@ export default function TournamentPage() {
                     expandedGames.has(game.gameNumber) &&
                     game.teamReport && (
                       <div className="px-4 pb-6 border-t border-gray-100">
+                        {game.narrative && (
+                          <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                              AI Coaching Analysis
+                            </p>
+                            <p className="text-sm text-gray-700 leading-relaxed">
+                              {game.narrative}
+                            </p>
+                          </div>
+                        )}
                         <MatchAnalysis
                           report={{ teams: [game.teamReport] }}
                           context="tournament"

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Upload, CheckCircle, AlertCircle, Loader2, ExternalLink, BarChart2 } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle, Loader2, ExternalLink, BarChart2, Trophy } from "lucide-react";
 
 export default function AdminPage() {
   const [url, setUrl] = useState("");
@@ -50,13 +50,22 @@ export default function AdminPage() {
             Paste a CricClubs scorecard URL to import match data.
           </p>
         </div>
-        <Link
-          href="/admin/tournament"
-          className="flex items-center gap-2 text-sm font-semibold text-vv-violet hover:underline shrink-0"
-        >
-          <BarChart2 size={16} />
-          Tournament Analysis
-        </Link>
+        <div className="flex items-center gap-4 shrink-0">
+          <Link
+            href="/admin/hub-league"
+            className="flex items-center gap-2 text-sm font-semibold text-vv-violet hover:underline"
+          >
+            <Trophy size={16} />
+            Hub League
+          </Link>
+          <Link
+            href="/admin/tournament"
+            className="flex items-center gap-2 text-sm font-semibold text-vv-violet hover:underline"
+          >
+            <BarChart2 size={16} />
+            Tournament Analysis
+          </Link>
+        </div>
       </div>
 
       <form onSubmit={handleImport} className="card p-6 space-y-5 border-t-4 border-vv-violet">

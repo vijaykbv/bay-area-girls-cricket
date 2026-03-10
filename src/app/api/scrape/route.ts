@@ -223,21 +223,21 @@ function parseDate(raw: string): string {
 function runAnalysisInBackground(matchId: string, homeTeam: string, awayTeam: string) {
   const supabase = createServerClient();
 
-  supabase
-    .from("innings")
-    .select("*, team:teams(*), batting_performances(*), bowling_performances(*)")
-    .eq("match_id", matchId)
-    .order("innings_number")
-    .then(({ data, error }) => {
-      if (error || !data) {
-        console.warn("[Analysis] Could not fetch innings for analysis:", error?.message);
-        return;
-      }
-      const report = analyzeMatch(data as Innings[]);
-      const title = `${homeTeam} vs ${awayTeam}`;
-      console.log(formatMatchReport(report, title));
-    })
-    .catch((err) => {
-      console.warn("[Analysis] Unexpected error:", err);
-    });
+  Promise.resolve(
+    supabase
+      .from("innings")
+      .select("*, team:teams(*), batting_performances(*), bowling_performances(*)")
+      .eq("match_id", matchId)
+      .order("innings_number")
+  ).then(({ data, error }) => {
+    if (error || !data) {
+      console.warn("[Analysis] Could not fetch innings for analysis:", error?.message);
+      return;
+    }
+    const report = analyzeMatch(data as Innings[]);
+    const title = `${homeTeam} vs ${awayTeam}`;
+    console.log(formatMatchReport(report, title));
+  }).catch((err: unknown) => {
+    console.warn("[Analysis] Unexpected error:", err);
+  });
 }

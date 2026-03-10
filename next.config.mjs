@@ -6,6 +6,9 @@ const nextConfig = {
       { protocol: "https", hostname: "*.supabase.co" },
     ],
   },
+  experimental: {
+    serverComponentsExternalPackages: ["playwright", "playwright-core", "@sparticuz/chromium"],
+  },
 };
 
 export default nextConfig;

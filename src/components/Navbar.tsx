@@ -10,6 +10,7 @@ const navLinks = [
   { href: "/players", label: "Players" },
   { href: "/schedule", label: "Schedule" },
   { href: "/results", label: "Results" },
+  { href: "/hub-league", label: "Hub" },
   { href: "/stats", label: "Statistics" },
   { href: "/news", label: "News" },
   { href: "/gallery", label: "Gallery" },
