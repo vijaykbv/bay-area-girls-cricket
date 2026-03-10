@@ -43,10 +43,10 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
     });
     const page = await context.newPage();
 
-    // Block images, fonts, media, and stylesheets to cut memory & bandwidth
+    // Block images, fonts, and media — keep CSS since some JS waits on it
     await page.route("**/*", (route) => {
       const type = route.request().resourceType();
-      if (["image", "media", "font", "stylesheet"].includes(type)) {
+      if (["image", "media", "font"].includes(type)) {
         route.abort();
       } else {
         route.continue();
