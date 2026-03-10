@@ -73,23 +73,34 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
     }
 
     const scorecardHtml = await page.content();
+
+    // Load the info page for match metadata (date, venue, competition)
+    const infoUrl = url.replace("viewScorecard.do", "info.do").replace("fullScorecard.do", "info.do");
+    let infoHtml = "";
+    try {
+      await page.goto(infoUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+      infoHtml = await page.content();
+    } catch {
+      console.warn("[scraper] info.do load failed — match metadata may be empty");
+    }
+
     const { writeFileSync } = await import("fs");
     writeFileSync("/tmp/cricclubs-debug.html", scorecardHtml);
 
-    return parseScorecard(scorecardHtml, url);
+    return parseScorecard(scorecardHtml, infoHtml, url);
   } finally {
     await browser.close();
   }
 }
 
-export function parseScorecard(scorecardHtml: string, url: string): ScorecardData {
+export function parseScorecard(scorecardHtml: string, infoHtml: string, url: string): ScorecardData {
   const $s = cheerio.load(scorecardHtml);
+  const $i = infoHtml ? cheerio.load(infoHtml) : $s;
 
-  // ── Match info from scorecard page ──────────────────────────────────────
-  // CricClubs embeds match details in the scorecard page too
-  const date        = infoTableValue($s, "Match Date")  || infoTableValue($s, "Date")  || todayStr();
-  const venue       = infoTableValue($s, "Location")    || infoTableValue($s, "Ground") || infoTableValue($s, "Venue") || "";
-  const competition = infoTableValue($s, "Series")      || infoTableValue($s, "League") || infoTableValue($s, "Competition") || "";
+  // ── Match info — prefer info.do page, fall back to scorecard page ────────
+  const date        = infoTableValue($i, "Match Date")  || infoTableValue($i, "Date")  || infoTableValue($s, "Match Date") || infoTableValue($s, "Date") || todayStr();
+  const venue       = infoTableValue($i, "Location")    || infoTableValue($i, "Ground") || infoTableValue($i, "Venue") || infoTableValue($s, "Location") || infoTableValue($s, "Ground") || "";
+  const competition = infoTableValue($i, "Series")      || infoTableValue($i, "League") || infoTableValue($i, "Competition") || infoTableValue($s, "Series") || "";
 
   // ── Team names from score-top summary ──────────────────────────────────
   const teamNames: string[] = [];
