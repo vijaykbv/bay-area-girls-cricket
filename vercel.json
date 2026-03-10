@@ -1,6 +1,6 @@
 {
   "functions": {
-    "src/app/api/scrape/route.ts": { "maxDuration": 60, "memory": 3009 },
-    "src/app/api/analyze-game/route.ts": { "maxDuration": 60, "memory": 3009 }
+    "src/app/api/scrape/route.ts": { "maxDuration": 60, "memory": 2048 },
+    "src/app/api/analyze-game/route.ts": { "maxDuration": 60, "memory": 2048 }
   }
 }
