@@ -12,7 +12,7 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
       const chromium = (await import("@sparticuz/chromium")).default;
       const { chromium: pw } = await import("playwright-core");
       browser = await pw.launch({
-        args: chromium.args,
+        args: [...chromium.args, "--disable-dev-shm-usage"],
         executablePath: await chromium.executablePath(),
         headless: true,
       });
