@@ -55,15 +55,8 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
 
     const page = await context.newPage();
 
-    // Block images, fonts, and media — keep CSS since some JS waits on it
-    await page.route("**/*", (route) => {
-      const type = route.request().resourceType();
-      if (["image", "media", "font"].includes(type)) {
-        route.abort();
-      } else {
-        route.continue();
-      }
-    });
+    // Do NOT block any resources — Cloudflare's JS challenge needs to load
+    // its own assets to complete verification before redirecting to the scorecard.
 
     await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
 
