@@ -60,17 +60,12 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
     throw new Error(`Scorecard table not found. Page title: "${title}". The page may still be behind a bot check.`);
   }
 
-  // Fetch match metadata from info.do via ScrapingAnt (fast — usually no CF challenge)
+  // Fetch match metadata from info.do — plain fetch, it's not CF-protected
   const infoUrl = url.replace("viewScorecard.do", "info.do").replace("fullScorecard.do", "info.do");
   let infoHtml = "";
   try {
-    if (process.env.VERCEL) {
-      infoHtml = await fetchWithScrapingAnt(infoUrl);
-    } else {
-      // For local dev, re-use Playwright would require another browser launch; just fetch
-      const res = await fetch(infoUrl);
-      infoHtml = res.ok ? await res.text() : "";
-    }
+    const res = await fetch(infoUrl, { signal: AbortSignal.timeout(15_000) });
+    infoHtml = res.ok ? await res.text() : "";
   } catch {
     console.warn("[scraper] info.do fetch failed — match metadata may be empty");
   }

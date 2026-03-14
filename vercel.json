@@ -1,6 +1,6 @@
 {
   "functions": {
-    "src/app/api/scrape/route.ts": { "maxDuration": 60 },
+    "src/app/api/scrape/route.ts": { "maxDuration": 120 },
     "src/app/api/analyze-game/route.ts": { "maxDuration": 60 }
   }
 }
