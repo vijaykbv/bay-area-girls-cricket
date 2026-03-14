@@ -94,7 +94,7 @@ export default function AdminPage() {
           {status === "loading" ? (
             <>
               <Loader2 size={16} className="animate-spin" />
-              Scraping & importing...
+              Analyzing...
             </>
           ) : (
             <>
@@ -132,8 +132,7 @@ export default function AdminPage() {
       <div className="mt-6 card p-4 border border-vv-violet/30 bg-vv-xlight">
         <p className="text-sm font-semibold text-black">Important notes</p>
         <ul className="mt-2 text-sm text-gray-600 list-disc list-inside space-y-1">
-          <li>The importer uses a real browser (Playwright) to load the page</li>
-          <li>It may take 15–30 seconds to scrape and save a scorecard</li>
+          <li>It may take 60–90 seconds to scrape and save a scorecard</li>
           <li>Only CricClubs URLs are supported</li>
           <li>Duplicate imports of the same URL will create duplicate entries</li>
         </ul>
