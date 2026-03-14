@@ -109,48 +109,36 @@ export default function ScoutTeamPage() {
     setPlayers(initialRows);
     setPhase("players");
 
-    // Step 2: fetch players in batches of 4 (parallel within each batch)
-    const BATCH_SIZE = 4;
+    // Step 2: fetch each player sequentially (ScrapingAnt free tier = 1 concurrent session)
     const { clubId, baseUrl } = rosterData;
     const filledRows = [...initialRows];
 
-    for (let start = 0; start < filledRows.length; start += BATCH_SIZE) {
+    for (let i = 0; i < filledRows.length; i++) {
       if (abortRef.current) break;
 
-      const end = Math.min(start + BATCH_SIZE, filledRows.length);
-
-      // Mark this batch as loading
-      for (let i = start; i < end; i++) {
-        filledRows[i] = { ...filledRows[i], status: "loading" };
-      }
-      setCurrentPlayerIdx(start);
+      setCurrentPlayerIdx(i);
+      filledRows[i] = { ...filledRows[i], status: "loading" };
       setPlayers([...filledRows]);
 
-      // Fetch all 4 in parallel
-      const results = await Promise.allSettled(
-        filledRows.slice(start, end).map((p) =>
-          fetch("/api/scout-team/player", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ playerId: p.id, clubId, baseUrl }),
-          }).then((r) => r.json())
-        )
-      );
-
-      // Apply results
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const idx = start + i;
-        if (result.status === "fulfilled" && !result.value.error) {
-          filledRows[idx] = {
-            ...filledRows[idx],
-            batting: result.value.batting ?? EMPTY_BATTING,
-            bowling: result.value.bowling ?? EMPTY_BOWLING,
+      try {
+        const res = await fetch("/api/scout-team/player", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ playerId: filledRows[i].id, clubId, baseUrl }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          filledRows[i] = { ...filledRows[i], batting: EMPTY_BATTING, bowling: EMPTY_BOWLING, status: "error" };
+        } else {
+          filledRows[i] = {
+            ...filledRows[i],
+            batting: data.batting ?? EMPTY_BATTING,
+            bowling: data.bowling ?? EMPTY_BOWLING,
             status: "done",
           };
-        } else {
-          filledRows[idx] = { ...filledRows[idx], batting: EMPTY_BATTING, bowling: EMPTY_BOWLING, status: "error" };
         }
+      } catch {
+        filledRows[i] = { ...filledRows[i], batting: EMPTY_BATTING, bowling: EMPTY_BOWLING, status: "error" };
       }
 
       setPlayers([...filledRows]);
@@ -242,7 +230,7 @@ export default function ScoutTeamPage() {
             <>
               <Loader2 size={16} className="animate-spin" />
               {phase === "roster" && "Fetching team roster..."}
-              {phase === "players" && `Loading players ${currentPlayerIdx + 1}–${Math.min(currentPlayerIdx + 4, players.length)} of ${players.length}...`}
+              {phase === "players" && `Loading player ${currentPlayerIdx + 1} of ${players.length}...`}
               {phase === "analysis" && "Generating scouting report..."}
             </>
           ) : (
