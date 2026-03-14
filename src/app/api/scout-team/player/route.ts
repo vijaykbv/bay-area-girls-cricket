@@ -166,7 +166,25 @@ export async function POST(req: NextRequest) {
 
   try {
     console.log(`[scout-team/player] Fetching profile: ${profileUrl}`);
-    const html = await fetchViaScrapingAnt(profileUrl);
+
+    // Try plain fetch first — player profile pages may not require JS rendering
+    let html: string;
+    try {
+      const plainRes = await fetch(profileUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      const plainHtml = await plainRes.text();
+      if (plainHtml.includes("Just a moment") || plainHtml.includes("cf-browser-verification")) {
+        console.log(`[scout-team/player] CF blocked playerId=${playerId}, falling back to ScrapingAnt`);
+        html = await fetchViaScrapingAnt(profileUrl);
+      } else {
+        html = plainHtml;
+      }
+    } catch {
+      console.log(`[scout-team/player] Plain fetch failed playerId=${playerId}, falling back to ScrapingAnt`);
+      html = await fetchViaScrapingAnt(profileUrl);
+    }
     const $ = cheerio.load(html);
 
     // Find batting table: header row contains "NO" and "Balls" columns
