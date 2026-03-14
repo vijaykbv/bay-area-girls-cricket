@@ -92,9 +92,10 @@ export default function ScoutTeamPage() {
         return;
       }
       rosterData = data;
-    } catch {
+    } catch (err: unknown) {
       setPhase("error");
-      setErrorMsg("Network error fetching roster. Please try again.");
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMsg(`Network error fetching roster: ${msg}`);
       return;
     }
 

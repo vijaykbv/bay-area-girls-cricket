@@ -40,8 +40,25 @@ export async function POST(req: NextRequest) {
     const leagueSlug = pathParts[0] ?? "";
     const baseUrl = `${parsedUrl.origin}/${leagueSlug}`;
 
-    console.log(`[scout-team/roster] Fetching: ${url}`);
-    const html = await fetchViaScrapingAnt(url);
+    // Try plain fetch first — viewTeam.do may not require JS rendering
+    console.log(`[scout-team/roster] Fetching (plain): ${url}`);
+    let html: string;
+    try {
+      const plainRes = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      const plainHtml = await plainRes.text();
+      if (plainHtml.includes("Just a moment") || plainHtml.includes("cf-browser-verification")) {
+        console.log(`[scout-team/roster] CF blocked, falling back to ScrapingAnt`);
+        html = await fetchViaScrapingAnt(url);
+      } else {
+        html = plainHtml;
+      }
+    } catch {
+      console.log(`[scout-team/roster] Plain fetch failed, falling back to ScrapingAnt`);
+      html = await fetchViaScrapingAnt(url);
+    }
     const $ = cheerio.load(html);
 
     const titleText = $("title").text().trim();
