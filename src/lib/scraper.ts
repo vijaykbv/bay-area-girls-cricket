@@ -2,6 +2,38 @@ import * as cheerio from "cheerio";
 import type { Element } from "domhandler";
 import type { ScorecardData, InningsData, RawBatting, RawBowling } from "./types";
 
+async function fetchWithScrapingAnt(targetUrl: string): Promise<string> {
+  const apiKey = process.env.SCRAPINGANT_API_KEY;
+  if (!apiKey) throw new Error("SCRAPINGANT_API_KEY is not set");
+
+  const endpoint = new URL("https://api.scrapingant.com/v2/general");
+  endpoint.searchParams.set("url", targetUrl);
+  endpoint.searchParams.set("x-api-key", apiKey);
+  endpoint.searchParams.set("browser", "true");
+  endpoint.searchParams.set("proxy_type", "datacenter");
+
+  const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(90_000) });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`ScrapingAnt error ${res.status}: ${body.slice(0, 300)}`);
+  }
+  return res.text();
+}
+
+async function fetchWithPlaywright(targetUrl: string): Promise<string> {
+  let browser;
+  const { chromium } = await import("playwright");
+  browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
+    await page.waitForSelector(".match-table-innings", { timeout: 45000, state: "attached" });
+    return page.content();
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function scrapeScorecard(url: string): Promise<ScorecardData> {
   const fullScorecardUrl = url
     .replace("viewScorecard.do", "fullScorecard.do")
@@ -11,95 +43,39 @@ export async function scrapeScorecard(url: string): Promise<ScorecardData> {
     throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
   }
 
-  let browser;
+  console.log(`[scraper] Fetching: ${fullScorecardUrl}`);
+
+  // On Vercel, use ScrapingAnt to bypass Cloudflare. Locally, use Playwright.
+  let scorecardHtml: string;
   if (process.env.VERCEL) {
-    const chromium = (await import("@sparticuz/chromium")).default;
-    const { chromium: pw } = await import("playwright-core");
-    browser = await pw.launch({
-      args: [
-        ...chromium.args,
-        "--disable-dev-shm-usage",
-        "--disable-background-networking",
-        "--disable-extensions",
-        "--disable-sync",
-        "--no-default-browser-check",
-        "--no-first-run",
-        "--mute-audio",
-        "--hide-scrollbars",
-      ],
-      executablePath: await chromium.executablePath(),
-      headless: true,
-    });
+    scorecardHtml = await fetchWithScrapingAnt(fullScorecardUrl);
   } else {
-    const { chromium } = await import("playwright");
-    browser = await chromium.launch({ headless: true });
+    scorecardHtml = await fetchWithPlaywright(fullScorecardUrl);
   }
 
+  // Verify we got the scorecard and not a CF challenge page
+  if (!scorecardHtml.includes("match-table-innings")) {
+    const $ = cheerio.load(scorecardHtml);
+    const title = $("title").text();
+    throw new Error(`Scorecard table not found. Page title: "${title}". The page may still be behind a bot check.`);
+  }
+
+  // Fetch match metadata from info.do via ScrapingAnt (fast — usually no CF challenge)
+  const infoUrl = url.replace("viewScorecard.do", "info.do").replace("fullScorecard.do", "info.do");
+  let infoHtml = "";
   try {
-    const context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      viewport: { width: 1280, height: 800 },
-      extraHTTPHeaders: {
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      },
-    });
-
-    // Mask headless browser signals that Cloudflare detects
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (!(window as any).chrome) (window as any).chrome = { runtime: {} };
-    });
-
-    const page = await context.newPage();
-
-    // Do NOT block any resources — Cloudflare's JS challenge needs to load
-    // its own assets to complete verification before redirecting to the scorecard.
-
-    await page.goto(fullScorecardUrl, { waitUntil: "domcontentloaded", timeout: 40000 });
-
-    const landedUrl = page.url();
-    const pageTitle = await page.title().catch(() => "");
-    console.log(`[scraper] Landed on: ${landedUrl} | Title: "${pageTitle}"`);
-
-    if (landedUrl.includes("ballbyball.do")) {
-      throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
+    if (process.env.VERCEL) {
+      infoHtml = await fetchWithScrapingAnt(infoUrl);
+    } else {
+      // For local dev, re-use Playwright would require another browser launch; just fetch
+      const res = await fetch(infoUrl);
+      infoHtml = res.ok ? await res.text() : "";
     }
-
-    try {
-      await page.waitForSelector(".match-table-innings", { timeout: 45000, state: "attached" });
-    } catch (selectorErr) {
-      if (page.url().includes("ballbyball.do")) {
-        throw new Error("Match is still in progress — scorecard not yet available. Try again after the match is complete.");
-      }
-      const finalTitle = await page.title().catch(() => "");
-      const snippet = (await page.content()).slice(0, 800);
-      const { writeFileSync: wfs } = await import("fs");
-      wfs("/tmp/cricclubs-fail.html", snippet);
-      throw new Error(`Scorecard table not found. Title: "${finalTitle}" | Page start: ${snippet}`);
-    }
-
-    const scorecardHtml = await page.content();
-
-    // Load the info page for match metadata (date, venue, competition)
-    const infoUrl = url.replace("viewScorecard.do", "info.do").replace("fullScorecard.do", "info.do");
-    let infoHtml = "";
-    try {
-      await page.goto(infoUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-      infoHtml = await page.content();
-    } catch {
-      console.warn("[scraper] info.do load failed — match metadata may be empty");
-    }
-
-    const { writeFileSync } = await import("fs");
-    writeFileSync("/tmp/cricclubs-debug.html", scorecardHtml);
-
-    return parseScorecard(scorecardHtml, infoHtml, url);
-  } finally {
-    await browser.close();
+  } catch {
+    console.warn("[scraper] info.do fetch failed — match metadata may be empty");
   }
+
+  return parseScorecard(scorecardHtml, infoHtml, url);
 }
 
 export function parseScorecard(scorecardHtml: string, infoHtml: string, url: string): ScorecardData {

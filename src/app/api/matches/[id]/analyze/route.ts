@@ -69,14 +69,20 @@ ${notes.trim()}
 
 Write a brief coaching analysis (3–5 sentences) that weaves in the coach's specific observations, highlights the most impactful performances, and identifies one or two concrete development areas. Be encouraging and specific. Write in flowing prose — no bullet points.`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 400,
-    messages: [{ role: "user", content: prompt }],
-  });
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 400,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-  const narrative =
-    response.content[0].type === "text" ? response.content[0].text : "";
+    const narrative =
+      response.content[0].type === "text" ? response.content[0].text : "";
 
-  return NextResponse.json({ narrative });
+    return NextResponse.json({ narrative });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[analyze] Anthropic error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

@@ -7,6 +7,7 @@ export default function MatchAIAnalysis({ matchId }: { matchId: string }) {
   const [notes, setNotes] = useState("");
   const [narrative, setNarrative] = useState("");
   const [status, setStatus] = useState<"idle" | "generating" | "done" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
 
   async function handleGenerate() {
     if (!notes.trim()) return;
@@ -22,8 +23,9 @@ export default function MatchAIAnalysis({ matchId }: { matchId: string }) {
       if (!res.ok) throw new Error(data.error ?? "Failed");
       setNarrative(data.narrative);
       setStatus("done");
-    } catch {
+    } catch (e) {
       setStatus("error");
+      setErrorMsg(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -54,7 +56,7 @@ export default function MatchAIAnalysis({ matchId }: { matchId: string }) {
       </div>
 
       {status === "error" && (
-        <p className="mt-3 text-sm text-red-600">Failed to generate analysis. Please try again.</p>
+        <p className="mt-3 text-sm text-red-600">Failed to generate analysis: {errorMsg || "Unknown error"}</p>
       )}
 
       {status === "done" && narrative && (
