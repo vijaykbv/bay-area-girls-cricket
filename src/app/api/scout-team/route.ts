@@ -3,30 +3,49 @@ import * as cheerio from "cheerio";
 
 export const maxDuration = 120;
 
-async function fetchViaScrapingAnt(targetUrl: string): Promise<string> {
+async function fetchViaScrapingAnt(targetUrl: string, browser = false): Promise<string> {
   const apiKey = process.env.SCRAPINGANT_API_KEY;
   if (!apiKey) throw new Error("SCRAPINGANT_API_KEY not set");
   const endpoint = new URL("https://api.scrapingant.com/v2/general");
   endpoint.searchParams.set("url", targetUrl);
   endpoint.searchParams.set("x-api-key", apiKey);
-  endpoint.searchParams.set("browser", "true");
+  endpoint.searchParams.set("browser", browser ? "true" : "false");
   endpoint.searchParams.set("proxy_country", "US");
-
-  // Retry up to 3 times on 409 (previous browser session still active)
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(90_000) });
-    if (res.status === 409 && attempt < 3) {
-      console.log(`[ScrapingAnt] 409 on attempt ${attempt}, waiting 20s...`);
-      await new Promise((r) => setTimeout(r, 20_000));
-      continue;
-    }
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`ScrapingAnt error ${res.status}: ${body.slice(0, 200)}`);
-    }
-    return res.text();
+  const timeout = browser ? 55_000 : 20_000;
+  const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(timeout) });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`ScrapingAnt error ${res.status}: ${body.slice(0, 200)}`);
   }
-  throw new Error("ScrapingAnt: concurrency limit not released after retries");
+  return res.text();
+}
+
+async function fetchPage(targetUrl: string): Promise<string> {
+  // 1. Plain fetch (instant, no credits)
+  try {
+    const res = await fetch(targetUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const html = await res.text();
+    if (!html.includes("Just a moment") && !html.includes("cf-browser-verification")) {
+      console.log(`[fetchPage] plain fetch succeeded: ${targetUrl}`);
+      return html;
+    }
+  } catch { /* fall through */ }
+
+  // 2. ScrapingAnt proxy (no browser, ~3s)
+  try {
+    const html = await fetchViaScrapingAnt(targetUrl, false);
+    if (!html.includes("Just a moment") && !html.includes("cf-browser-verification")) {
+      console.log(`[fetchPage] ScrapingAnt proxy succeeded: ${targetUrl}`);
+      return html;
+    }
+  } catch { /* fall through */ }
+
+  // 3. ScrapingAnt browser (~55s) — last resort
+  console.log(`[fetchPage] falling back to ScrapingAnt browser: ${targetUrl}`);
+  return fetchViaScrapingAnt(targetUrl, true);
 }
 
 // Returns team name, player list, and the info needed to construct player profile URLs
@@ -50,25 +69,8 @@ export async function POST(req: NextRequest) {
     const leagueSlug = pathParts[0] ?? "";
     const baseUrl = `${parsedUrl.origin}/${leagueSlug}`;
 
-    // Try plain fetch first — viewTeam.do may not require JS rendering
-    console.log(`[scout-team/roster] Fetching (plain): ${url}`);
-    let html: string;
-    try {
-      const plainRes = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
-        signal: AbortSignal.timeout(15_000),
-      });
-      const plainHtml = await plainRes.text();
-      if (plainHtml.includes("Just a moment") || plainHtml.includes("cf-browser-verification")) {
-        console.log(`[scout-team/roster] CF blocked, falling back to ScrapingAnt`);
-        html = await fetchViaScrapingAnt(url);
-      } else {
-        html = plainHtml;
-      }
-    } catch {
-      console.log(`[scout-team/roster] Plain fetch failed, falling back to ScrapingAnt`);
-      html = await fetchViaScrapingAnt(url);
-    }
+    console.log(`[scout-team/roster] Fetching: ${url}`);
+    const html = await fetchPage(url);
     const $ = cheerio.load(html);
 
     const titleText = $("title").text().trim();
