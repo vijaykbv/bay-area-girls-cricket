@@ -10,7 +10,7 @@ async function fetchWithScrapingAnt(targetUrl: string): Promise<string> {
   endpoint.searchParams.set("url", targetUrl);
   endpoint.searchParams.set("x-api-key", apiKey);
   endpoint.searchParams.set("browser", "true");
-  endpoint.searchParams.set("proxy_type", "datacenter");
+  endpoint.searchParams.set("proxy_country", "US");
 
   const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(90_000) });
   if (!res.ok) {
