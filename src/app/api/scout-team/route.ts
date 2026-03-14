@@ -281,24 +281,33 @@ export async function POST(req: NextRequest) {
 
     console.log(`[scout-team] Found ${playerList.length} players on team "${teamName}"`);
 
-    // Fetch all player profiles in parallel
-    const profileResults = await Promise.all(
-      playerList.map(async (p) => {
-        const profileUrl = `${baseUrl}/viewPlayer.do?playerId=${p.id}&clubId=${clubId}`;
-        try {
-          const html = await fetchViaScrapingAnt(profileUrl);
-          const stats = parsePlayerProfile(html);
-          return { name: p.name, ...stats } as PlayerResult;
-        } catch (err) {
-          console.warn(`[scout-team] Failed to fetch profile for ${p.name} (id=${p.id}):`, err);
-          return {
-            name: p.name,
-            batting: { matches: 0, innings: 0, runs: 0, battingAvg: 0, strikeRate: 0, highScore: 0, fifties: 0, twentyFives: 0 },
-            bowling: { matches: 0, wickets: 0, economy: 0, bowlingAvg: 0, bbf: "", overs: 0 },
-          } as PlayerResult;
-        }
-      })
-    );
+    // Fetch player profiles in batches of 3 to stay within ScrapingAnt concurrency limits.
+    // All-parallel (11 at once) causes most requests to fail on the free tier.
+    const BATCH_SIZE = 3;
+    const profileResults: PlayerResult[] = [];
+
+    for (let i = 0; i < playerList.length; i += BATCH_SIZE) {
+      const batch = playerList.slice(i, i + BATCH_SIZE);
+      console.log(`[scout-team] Fetching profiles batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(playerList.length / BATCH_SIZE)} (${batch.map(p => p.name).join(", ")})`);
+      const batchResults = await Promise.all(
+        batch.map(async (p) => {
+          const profileUrl = `${baseUrl}/viewPlayer.do?playerId=${p.id}&clubId=${clubId}`;
+          try {
+            const html = await fetchViaScrapingAnt(profileUrl);
+            const stats = parsePlayerProfile(html);
+            return { name: p.name, ...stats } as PlayerResult;
+          } catch (err) {
+            console.warn(`[scout-team] Failed to fetch profile for ${p.name} (id=${p.id}):`, err);
+            return {
+              name: p.name,
+              batting: { matches: 0, innings: 0, runs: 0, battingAvg: 0, strikeRate: 0, highScore: 0, fifties: 0, twentyFives: 0 },
+              bowling: { matches: 0, wickets: 0, economy: 0, bowlingAvg: 0, bbf: "", overs: 0 },
+            } as PlayerResult;
+          }
+        })
+      );
+      profileResults.push(...batchResults);
+    }
 
     // Call Claude for analysis
     const anthropic = new Anthropic();

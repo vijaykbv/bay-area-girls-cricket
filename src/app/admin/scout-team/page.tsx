@@ -142,7 +142,7 @@ export default function ScoutTeamPage() {
 
         {status === "loading" && (
           <p className="text-sm text-gray-500 text-center">
-            Analyzing team... This takes about 2 minutes
+            Analyzing team... This takes 3–4 minutes
           </p>
         )}
 
