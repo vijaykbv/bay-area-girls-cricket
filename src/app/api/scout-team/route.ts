@@ -11,12 +11,22 @@ async function fetchViaScrapingAnt(targetUrl: string): Promise<string> {
   endpoint.searchParams.set("x-api-key", apiKey);
   endpoint.searchParams.set("browser", "true");
   endpoint.searchParams.set("proxy_country", "US");
-  const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(90_000) });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`ScrapingAnt error ${res.status}: ${body.slice(0, 200)}`);
+
+  // Retry up to 3 times on 409 (previous browser session still active)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(90_000) });
+    if (res.status === 409 && attempt < 3) {
+      console.log(`[ScrapingAnt] 409 on attempt ${attempt}, waiting 20s...`);
+      await new Promise((r) => setTimeout(r, 20_000));
+      continue;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`ScrapingAnt error ${res.status}: ${body.slice(0, 200)}`);
+    }
+    return res.text();
   }
-  return res.text();
+  throw new Error("ScrapingAnt: concurrency limit not released after retries");
 }
 
 // Returns team name, player list, and the info needed to construct player profile URLs
