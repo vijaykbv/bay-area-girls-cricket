@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import type { Element } from "domhandler";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 async function fetchViaScrapingAnt(targetUrl: string, browser = false): Promise<string> {
   const apiKey = process.env.SCRAPINGANT_API_KEY;
@@ -12,7 +12,7 @@ async function fetchViaScrapingAnt(targetUrl: string, browser = false): Promise<
   endpoint.searchParams.set("x-api-key", apiKey);
   endpoint.searchParams.set("browser", browser ? "true" : "false");
   endpoint.searchParams.set("proxy_country", "US");
-  const timeout = browser ? 50_000 : 5_000;
+  const timeout = browser ? 90_000 : 10_000;
   const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(timeout) });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -26,7 +26,7 @@ async function fetchPage(targetUrl: string): Promise<string> {
   try {
     const res = await fetch(targetUrl, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
-      signal: AbortSignal.timeout(4_000),
+      signal: AbortSignal.timeout(10_000),
     });
     const html = await res.text();
     if (!html.includes("Just a moment") && !html.includes("cf-browser-verification")) {
