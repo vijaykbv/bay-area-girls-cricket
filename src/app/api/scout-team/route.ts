@@ -65,13 +65,29 @@ export async function POST(req: NextRequest) {
     const teamName = titleText.includes(" - ") ? titleText.split(" - ")[0].trim() : titleText;
 
     const players: Array<{ id: string; name: string }> = [];
-    $("td.sorting_1").each((_, el) => {
-      const idText = $(el).text().trim();
-      const name = $(el).next("td").text().replace(/\s+/g, " ").trim();
-      if (idText && name && /^\d+$/.test(idText)) {
-        players.push({ id: idText, name });
+
+    // Extract player ID from the profile link href, not the row number in sorting_1
+    $("a[href*='viewPlayerProfile.do']").each((_, el) => {
+      const href = $(el).attr("href") ?? "";
+      const match = href.match(/[?&]playerId=(\d+)/);
+      if (!match) return;
+      const id = match[1];
+      const name = $(el).text().replace(/\s+/g, " ").trim();
+      if (id && name && !players.find((p) => p.id === id)) {
+        players.push({ id, name });
       }
     });
+
+    // Fallback: try sorting_1 column if no profile links found
+    if (players.length === 0) {
+      $("td.sorting_1").each((_, el) => {
+        const idText = $(el).text().trim();
+        const name = $(el).next("td").text().replace(/\s+/g, " ").trim();
+        if (idText && name && /^\d+$/.test(idText)) {
+          players.push({ id: idText, name });
+        }
+      });
+    }
 
     if (players.length === 0) {
       return NextResponse.json({ error: "No players found on team page" }, { status: 422 });
