@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Upload, CheckCircle, AlertCircle, Loader2, ExternalLink, BarChart2, Trophy } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle, Loader2, ExternalLink, BarChart2, Trophy, Search } from "lucide-react";
 
 export default function AdminPage() {
   const [url, setUrl] = useState("");
@@ -64,6 +64,13 @@ export default function AdminPage() {
           >
             <BarChart2 size={16} />
             Tournament Analysis
+          </Link>
+          <Link
+            href="/admin/scout-team"
+            className="flex items-center gap-2 text-sm font-semibold text-vv-violet hover:underline"
+          >
+            <Search size={16} />
+            Scout Team
           </Link>
         </div>
       </div>
