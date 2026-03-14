@@ -1,6 +1,9 @@
 {
   "functions": {
     "src/app/api/scrape/route.ts": { "maxDuration": 120 },
-    "src/app/api/analyze-game/route.ts": { "maxDuration": 60 }
+    "src/app/api/analyze-game/route.ts": { "maxDuration": 60 },
+    "src/app/api/scout-team/route.ts": { "maxDuration": 120 },
+    "src/app/api/scout-team/player/route.ts": { "maxDuration": 120 },
+    "src/app/api/scout-team/analyze/route.ts": { "maxDuration": 60 }
   }
 }
