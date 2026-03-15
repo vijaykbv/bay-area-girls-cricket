@@ -3,6 +3,7 @@ import BattingScorecard from "@/components/BattingScorecard";
 import BowlingScorecard from "@/components/BowlingScorecard";
 import MatchAnalysis from "@/components/MatchAnalysis";
 import MatchAIAnalysis from "@/components/MatchAIAnalysis";
+import MatchSummary from "@/components/MatchSummary";
 import PlayersOfMatch from "@/components/PlayersOfMatch";
 import { analyzeMatch, computePlayersOfMatch } from "@/lib/analyze";
 import type { Match, Innings } from "@/lib/types";
@@ -184,6 +185,9 @@ export default async function MatchPage({
           )}
         </div>
       </div>
+
+      {/* ── Auto-generated match summary ──────────────────────── */}
+      {innings.length > 0 && <MatchSummary matchId={params.id} />}
 
       {/* ── Players of the Match ──────────────────────────────── */}
       <PlayersOfMatch players={potm} />
